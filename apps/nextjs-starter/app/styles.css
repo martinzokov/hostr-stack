@@ -1,0 +1,150 @@
+:root {
+  color-scheme: light;
+  --bg: #f6f7f8;
+  --panel: #ffffff;
+  --text: #172026;
+  --muted: #61717d;
+  --line: #dfe5e8;
+  --brand: #0f766e;
+  --brand-dark: #115e59;
+  --accent: #b45309;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+}
+
+.panel {
+  width: min(960px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 32px;
+  display: grid;
+  gap: 28px;
+  box-shadow: 0 18px 60px rgba(23, 32, 38, 0.08);
+}
+
+.eyebrow,
+.label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+h1 {
+  margin: 8px 0 0;
+  max-width: 680px;
+  font-size: 42px;
+  line-height: 1.05;
+  letter-spacing: 0;
+}
+
+.lede {
+  max-width: 620px;
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1.6;
+}
+
+.statusGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.status {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  min-height: 104px;
+}
+
+.status p:last-child {
+  margin: 10px 0 0;
+  line-height: 1.35;
+}
+
+.authBox {
+  border-top: 1px solid var(--line);
+  padding-top: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.subject {
+  margin: 6px 0 0;
+  font-size: 18px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+button {
+  border: 0;
+  border-radius: 6px;
+  min-height: 42px;
+  padding: 0 18px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.primaryButton {
+  background: var(--brand);
+  color: white;
+}
+
+.primaryButton:hover:not(:disabled) {
+  background: var(--brand-dark);
+}
+
+.secondaryButton {
+  background: #f3eadc;
+  color: var(--accent);
+}
+
+@media (max-width: 760px) {
+  .shell {
+    padding: 16px;
+    place-items: stretch;
+  }
+
+  .panel {
+    padding: 22px;
+  }
+
+  h1 {
+    font-size: 32px;
+  }
+
+  .statusGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .authBox {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+

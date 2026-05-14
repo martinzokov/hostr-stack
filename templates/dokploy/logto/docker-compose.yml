@@ -1,0 +1,25 @@
+name: hostr-logto
+
+networks:
+  hostr:
+    external: true
+    name: hostr-network
+
+services:
+  logto:
+    image: ghcr.io/logto-io/logto:latest
+    restart: unless-stopped
+    networks: [hostr]
+    entrypoint: ["sh", "-c", "npm run cli db seed -- --swe && npm start"]
+    environment:
+      TRUST_PROXY_HEADER: "1"
+      DB_URL: postgres://hostr:${POSTGRES_PASSWORD}@postgres:5432/logto
+      ENDPOINT: https://${LOGTO_DOMAIN}
+      ADMIN_ENDPOINT: https://${LOGTO_ADMIN_DOMAIN}
+      DATABASE_STATEMENT_TIMEOUT: DISABLE_TIMEOUT
+    volumes:
+      - logto_connectors:/etc/logto/packages/core/connectors
+
+volumes:
+  logto_connectors:
+    name: hostr-saas-logto-connectors

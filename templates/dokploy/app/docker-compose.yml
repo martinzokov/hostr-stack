@@ -1,0 +1,27 @@
+name: hostr-app
+
+networks:
+  hostr:
+    external: true
+    name: hostr-network
+
+services:
+  app:
+    image: ${APP_IMAGE:-hostr-nextjs-starter:latest}
+    pull_policy: ${APP_PULL_POLICY:-never}
+    restart: unless-stopped
+    networks: [hostr]
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      NEXT_PUBLIC_APP_URL: https://${APP_DOMAIN}
+      DATABASE_URL: postgresql://hostr:${POSTGRES_PASSWORD}@postgres:5432/app
+      LOGTO_APP_ID: ${LOGTO_APP_ID}
+      LOGTO_APP_SECRET: ${LOGTO_APP_SECRET}
+      LOGTO_ENDPOINT: https://${LOGTO_DOMAIN}
+      LOGTO_BASE_URL: https://${APP_DOMAIN}
+      LOGTO_COOKIE_SECRET: ${LOGTO_COOKIE_SECRET}
+      NEXT_PUBLIC_UMAMI_SRC: https://${UMAMI_DOMAIN}/script.js
+      NEXT_PUBLIC_UMAMI_WEBSITE_ID: ${UMAMI_WEBSITE_ID:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      USESEND_API_URL: https://${USESEND_DOMAIN}/api

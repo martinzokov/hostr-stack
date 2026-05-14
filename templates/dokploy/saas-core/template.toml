@@ -1,0 +1,124 @@
+[variables]
+app_domain = "${domain}"
+auth_domain = "auth.${domain}"
+auth_admin_domain = "auth-admin.${domain}"
+umami_domain = "umami.${domain}"
+usesend_domain = "mail.${domain}"
+postgres_password = "${password:32}"
+umami_secret = "${base64:48}"
+cookie_secret = "${base64:48}"
+usesend_secret = "${base64:48}"
+minio_password = "${password:32}"
+
+[config]
+[[config.domains]]
+serviceName = "app"
+port = 3000
+host = "${app_domain}"
+path = "/"
+
+[[config.domains]]
+serviceName = "logto"
+port = 3001
+host = "${auth_domain}"
+path = "/"
+
+[[config.domains]]
+serviceName = "logto"
+port = 3002
+host = "${auth_admin_domain}"
+path = "/"
+
+[[config.domains]]
+serviceName = "umami"
+port = 3000
+host = "${umami_domain}"
+path = "/"
+
+[[config.domains]]
+serviceName = "usesend"
+port = 3000
+host = "${usesend_domain}"
+path = "/"
+
+[config.env]
+APP_DOMAIN = "${app_domain}"
+LOGTO_DOMAIN = "${auth_domain}"
+LOGTO_ADMIN_DOMAIN = "${auth_admin_domain}"
+UMAMI_DOMAIN = "${umami_domain}"
+USESEND_DOMAIN = "${usesend_domain}"
+ENABLE_SIGNOZ = "false"
+COMPOSE_PROFILES = ""
+OTEL_EXPORTER_OTLP_ENDPOINT = ""
+POSTGRES_PASSWORD = "${postgres_password}"
+UMAMI_APP_SECRET = "${umami_secret}"
+LOGTO_COOKIE_SECRET = "${cookie_secret}"
+SIGNOZ_JWT_SECRET = ""
+USESEND_NEXTAUTH_SECRET = "${usesend_secret}"
+MINIO_ROOT_PASSWORD = "${minio_password}"
+LOGTO_APP_ID = "'Fill after creating Logto app'"
+LOGTO_APP_SECRET = "'Fill after creating Logto app'"
+USESEND_GITHUB_ID = "replace-with-github-client-id"
+USESEND_GITHUB_SECRET = "replace-with-github-client-secret"
+AWS_DEFAULT_REGION = "us-east-1"
+AWS_ACCESS_KEY = "usesend-local"
+AWS_SECRET_KEY = "usesend-local"
+APP_IMAGE = "hostr-nextjs-starter:latest"
+APP_BUILD_CONTEXT = "./apps/nextjs-starter"
+APP_DOCKERFILE = "Dockerfile"
+
+[[config.mounts]]
+filePath = "/initdb/00-create-databases.sql"
+content = """
+CREATE DATABASE logto;
+CREATE DATABASE umami;
+"""
+
+[[config.mounts]]
+filePath = "/signoz-prometheus.yml"
+content = """
+global:
+  scrape_interval: 15s
+"""
+
+[[config.mounts]]
+filePath = "/otel-collector-config.yaml"
+content = """
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+processors:
+  batch:
+exporters:
+  clickhousetraces:
+    datasource: tcp://clickhouse:9000/signoz_traces
+    use_new_schema: true
+  signozclickhousemetrics:
+    dsn: tcp://clickhouse:9000/signoz_metrics
+    timeout: 15s
+  clickhouselogsexporter:
+    dsn: tcp://clickhouse:9000/signoz_logs
+    timeout: 10s
+    use_new_schema: true
+  metadataexporter:
+    dsn: tcp://clickhouse:9000/signoz_metadata
+    timeout: 10s
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [clickhousetraces, metadataexporter]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [signozclickhousemetrics, metadataexporter]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [clickhouselogsexporter, metadataexporter]
+"""

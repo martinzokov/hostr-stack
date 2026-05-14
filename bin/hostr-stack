@@ -1,0 +1,330 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env}"
+TEMPLATES_DIR="$ROOT_DIR/templates/dokploy"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  bin/hostr-stack init [--domain example.com]
+  bin/hostr-stack validate
+  bin/hostr-stack deploy
+  bin/hostr-stack smoke
+
+Environment:
+  Configure .env from .env.example. deploy requires DOKPLOY_DOMAIN,
+  DOKPLOY_API_KEY, and DOKPLOY_ENVIRONMENT_ID. Dokploy API access is
+  always made over HTTPS.
+USAGE
+}
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "Missing required command: $1" >&2
+    exit 1
+  }
+}
+
+random_secret() {
+  openssl rand -base64 "${1:-32}" | tr -d '\n'
+}
+
+random_hex() {
+  openssl rand -hex "${1:-24}" | tr -d '\n'
+}
+
+load_env() {
+  if [ -f "$ENV_FILE" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$ENV_FILE"
+    set +a
+  fi
+}
+
+signoz_enabled() {
+  case "${ENABLE_SIGNOZ:-false}" in
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;
+  esac
+  return 1
+}
+
+write_default_env() {
+  if [ ! -f "$ENV_FILE" ]; then
+    cp "$ROOT_DIR/.env.example" "$ENV_FILE"
+  fi
+}
+
+set_env_value() {
+  local key="$1"
+  local value="$2"
+  if grep -q "^${key}=" "$ENV_FILE"; then
+    perl -0pi -e "s|^${key}=.*$|${key}=${value}|m" "$ENV_FILE"
+  else
+    printf '\n%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+  fi
+}
+
+remove_env_value() {
+  local key="$1"
+  if [ -f "$ENV_FILE" ]; then
+    perl -0pi -e "s|^${key}=.*\n?||m" "$ENV_FILE"
+  fi
+}
+
+init_env() {
+  need openssl
+  write_default_env
+
+  local domain=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --domain) domain="${2:-}"; shift 2 ;;
+      *) echo "Unknown init option: $1" >&2; exit 1 ;;
+    esac
+  done
+
+  load_env
+  if [ -n "$domain" ]; then
+    set_env_value ROOT_DOMAIN "$domain"
+    set_env_value DOKPLOY_DOMAIN "dokploy.$domain"
+    remove_env_value DOKPLOY_URL
+    set_env_value APP_DOMAIN "app.$domain"
+    set_env_value LOGTO_DOMAIN "auth.$domain"
+    set_env_value LOGTO_ADMIN_DOMAIN "auth-admin.$domain"
+    set_env_value UMAMI_DOMAIN "umami.$domain"
+    set_env_value SIGNOZ_DOMAIN "signoz.$domain"
+    set_env_value USESEND_DOMAIN "mail.$domain"
+  fi
+
+  load_env
+  [ -n "${POSTGRES_PASSWORD:-}" ] || set_env_value POSTGRES_PASSWORD "$(random_hex 24)"
+  [ -n "${UMAMI_APP_SECRET:-}" ] || set_env_value UMAMI_APP_SECRET "$(random_secret 32)"
+  [ -n "${LOGTO_COOKIE_SECRET:-}" ] || set_env_value LOGTO_COOKIE_SECRET "$(random_secret 32)"
+  if signoz_enabled; then
+    [ -n "${SIGNOZ_JWT_SECRET:-}" ] || set_env_value SIGNOZ_JWT_SECRET "$(random_secret 32)"
+    [ -n "${OTEL_EXPORTER_OTLP_ENDPOINT:-}" ] || set_env_value OTEL_EXPORTER_OTLP_ENDPOINT "http://otel-collector:4318"
+  fi
+  [ -n "${USESEND_NEXTAUTH_SECRET:-}" ] || set_env_value USESEND_NEXTAUTH_SECRET "$(random_secret 32)"
+  [ -n "${MINIO_ROOT_PASSWORD:-}" ] || set_env_value MINIO_ROOT_PASSWORD "$(random_secret 24)"
+
+  echo "Initialized $ENV_FILE"
+}
+
+validate() {
+  need docker
+  load_env
+  local ok=0
+  for template in \
+    "$TEMPLATES_DIR/data/docker-compose.yml" \
+    "$TEMPLATES_DIR/logto/docker-compose.yml" \
+    "$TEMPLATES_DIR/umami/docker-compose.yml" \
+    "$TEMPLATES_DIR/usesend/docker-compose.yml" \
+    "$TEMPLATES_DIR/app/docker-compose.yml"; do
+    if docker compose --env-file "$ENV_FILE" -f "$template" config >/dev/null 2>&1; then
+      echo "[ok] $template"
+    else
+      echo "[fail] $template" >&2
+      ok=1
+    fi
+  done
+  return "$ok"
+}
+
+api_post() {
+  local endpoint="$1"
+  local data="$2"
+  curl -fsS \
+    -X POST "https://${DOKPLOY_DOMAIN%/}/api/trpc/$endpoint" \
+    -H "Content-Type: application/json" \
+    -H "x-api-key: $DOKPLOY_API_KEY" \
+    --data-binary "$data"
+}
+
+create_domain() {
+  local compose_id="$1"
+  local service_name="$2"
+  local port="$3"
+  local host="$4"
+
+  [ -n "$host" ] || return 0
+
+  api_post domain.create \
+    "{\"json\":{\"host\":\"$host\",\"path\":\"/\",\"port\":$port,\"https\":true,\"certificateType\":\"letsencrypt\",\"composeId\":\"$compose_id\",\"serviceName\":\"$service_name\",\"domainType\":\"compose\"}}" \
+    >/dev/null 2>&1 || true
+}
+
+json_escape_file() {
+  python3 -c 'import json, pathlib, sys; print(json.dumps(pathlib.Path(sys.argv[1]).read_text()), end="")' "$1"
+}
+
+env_payload() {
+  python3 - "$ENV_FILE" <<'PY'
+import json, os, pathlib, sys
+
+lines = [
+    line
+    for line in pathlib.Path(sys.argv[1]).read_text().splitlines()
+    if line.strip() and not line.strip().startswith("#")
+]
+
+compose_profiles = os.environ.get("COMPOSE_PROFILES")
+if compose_profiles:
+    lines = [line for line in lines if not line.startswith("COMPOSE_PROFILES=")]
+    lines.append(f"COMPOSE_PROFILES={compose_profiles}")
+
+raw = "\n".join(lines)
+print(json.dumps(raw), end="")
+PY
+}
+
+lookup_compose() {
+  local name="$1"
+  curl -fsS \
+    -X GET "https://${DOKPLOY_DOMAIN%/}/api/trpc/project.all" \
+    -H "x-api-key: $DOKPLOY_API_KEY" \
+    | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+name = '${name}'
+env_id = '${DOKPLOY_ENVIRONMENT_ID}'
+for project in d.get('result', {}).get('data', {}).get('json', []):
+    for env in project.get('environments', []):
+        if env.get('environmentId') == env_id:
+            for c in env.get('compose', []):
+                if c.get('name') == name:
+                    print(c.get('composeId') or '')
+                    raise SystemExit(0)
+" 2>/dev/null || true
+}
+
+deploy_one() {
+  local name="$1"
+  local template="$2"
+  local compose_json env_json compose_id response
+
+  compose_json="$(json_escape_file "$template")"
+  env_json="$(env_payload)"
+
+  compose_id="$(lookup_compose "$name")"
+
+  if [ -z "$compose_id" ]; then
+    response="$(api_post compose.create \
+      "{\"json\":{\"name\":\"$name\",\"environmentId\":\"$DOKPLOY_ENVIRONMENT_ID\",\"composeType\":\"docker-compose\",\"sourceType\":\"raw\",\"composeFile\":$compose_json}}")"
+    compose_id="$(python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+d = data.get("result", {}).get("data", {}).get("json", data)
+print(d.get("composeId") or d.get("id") or "")
+' <<<"$response")"
+    [ -n "$compose_id" ] || { echo "No compose id from Dokploy for $name: $response" >&2; exit 1; }
+    echo "Created $name ($compose_id)" >&2
+  else
+    echo "Found $name ($compose_id)" >&2
+  fi
+
+  api_post compose.saveEnvironment \
+    "{\"json\":{\"composeId\":\"$compose_id\",\"env\":$env_json}}" >/dev/null
+  api_post compose.update \
+    "{\"json\":{\"composeId\":\"$compose_id\",\"composeFile\":$compose_json,\"sourceType\":\"raw\",\"composeType\":\"docker-compose\"}}" >/dev/null
+
+  echo "$compose_id"
+}
+
+deploy() {
+  need curl
+  need python3
+  load_env
+  : "${DOKPLOY_DOMAIN:?Set DOKPLOY_DOMAIN in .env}"
+  : "${DOKPLOY_API_KEY:?Set DOKPLOY_API_KEY in .env}"
+  : "${DOKPLOY_ENVIRONMENT_ID:?Set DOKPLOY_ENVIRONMENT_ID in .env}"
+  case "$DOKPLOY_DOMAIN" in
+    http://*|https://*)
+      echo "DOKPLOY_DOMAIN should be a hostname only, e.g. dokploy.example.com" >&2
+      exit 1 ;;
+  esac
+
+  local id
+
+  # hostr-data (postgres)
+  id="$(deploy_one "hostr-data" "$TEMPLATES_DIR/data/docker-compose.yml")"
+  api_post compose.deploy "{\"json\":{\"composeId\":\"$id\"}}" >/dev/null
+  echo "Deployed hostr-data"
+
+  # hostr-logto
+  id="$(deploy_one "hostr-logto" "$TEMPLATES_DIR/logto/docker-compose.yml")"
+  create_domain "$id" logto 3001 "${LOGTO_DOMAIN:-}"
+  create_domain "$id" logto 3002 "${LOGTO_ADMIN_DOMAIN:-}"
+  api_post compose.deploy "{\"json\":{\"composeId\":\"$id\"}}" >/dev/null
+  echo "Deployed hostr-logto"
+
+  # hostr-umami
+  id="$(deploy_one "hostr-umami" "$TEMPLATES_DIR/umami/docker-compose.yml")"
+  create_domain "$id" umami 3000 "${UMAMI_DOMAIN:-}"
+  api_post compose.deploy "{\"json\":{\"composeId\":\"$id\"}}" >/dev/null
+  echo "Deployed hostr-umami"
+
+  # hostr-usesend
+  id="$(deploy_one "hostr-usesend" "$TEMPLATES_DIR/usesend/docker-compose.yml")"
+  create_domain "$id" usesend 3000 "${USESEND_DOMAIN:-}"
+  api_post compose.deploy "{\"json\":{\"composeId\":\"$id\"}}" >/dev/null
+  echo "Deployed hostr-usesend"
+
+  # hostr-app
+  id="$(deploy_one "hostr-app" "$TEMPLATES_DIR/app/docker-compose.yml")"
+  create_domain "$id" app 3000 "${APP_DOMAIN:-}"
+  api_post compose.deploy "{\"json\":{\"composeId\":\"$id\"}}" >/dev/null
+  echo "Deployed hostr-app"
+
+  # hostr-signoz (optional)
+  if signoz_enabled; then
+    id="$(deploy_one "hostr-signoz" "$TEMPLATES_DIR/signoz/docker-compose.yml")"
+    create_domain "$id" signoz 8080 "${SIGNOZ_DOMAIN:-}"
+    api_post compose.deploy "{\"json\":{\"composeId\":\"$id\"}}" >/dev/null
+    echo "Deployed hostr-signoz"
+  fi
+
+  echo "All services deployed"
+}
+
+smoke() {
+  load_env
+  local failures=0
+  local pairs=(
+    "app:https://${APP_DOMAIN:-}"
+    "logto:https://${LOGTO_DOMAIN:-}"
+    "logto-admin:https://${LOGTO_ADMIN_DOMAIN:-}"
+    "umami:https://${UMAMI_DOMAIN:-}"
+    "usesend:https://${USESEND_DOMAIN:-}"
+  )
+  if signoz_enabled; then
+    pairs+=("signoz:https://${SIGNOZ_DOMAIN:-}")
+  fi
+  for pair in "${pairs[@]}"; do
+    local name="${pair%%:*}"
+    local url="${pair#*:}"
+    if [ "$url" = "https://" ]; then
+      echo "[skip] $name domain not configured"
+      continue
+    fi
+    if curl -kfsS --max-time 15 "$url" >/dev/null; then
+      echo "[ok] $name $url"
+    else
+      echo "[fail] $name $url"
+      failures=$((failures + 1))
+    fi
+  done
+  exit "$failures"
+}
+
+cmd="${1:-}"
+case "$cmd" in
+  init) shift; init_env "$@" ;;
+  validate) validate ;;
+  deploy) deploy ;;
+  smoke) smoke ;;
+  -h|--help|help|"") usage ;;
+  *) echo "Unknown command: $cmd" >&2; usage; exit 1 ;;
+esac

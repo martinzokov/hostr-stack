@@ -1,0 +1,100 @@
+name: hostr-signoz
+
+networks:
+  hostr:
+    external: true
+    name: hostr-network
+
+services:
+  signoz:
+    image: signoz/signoz:v0.97.1
+    restart: unless-stopped
+    networks: [hostr]
+    command: ["--config=/root/config/prometheus.yml"]
+    environment:
+      SIGNOZ_ALERTMANAGER_PROVIDER: signoz
+      SIGNOZ_TELEMETRYSTORE_CLICKHOUSE_DSN: tcp://clickhouse:9000
+      SIGNOZ_SQLSTORE_SQLITE_PATH: /var/lib/signoz/signoz.db
+      STORAGE: clickhouse
+      DEPLOYMENT_TYPE: docker-standalone-amd
+      SIGNOZ_JWT_SECRET: ${SIGNOZ_JWT_SECRET:-}
+    volumes:
+      - signoz_sqlite:/var/lib/signoz
+      - ${HOSTR_STACK_ROOT:-.}/templates/dokploy/saas-core/signoz-prometheus.yml:/root/config/prometheus.yml:ro
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.5.6
+    restart: unless-stopped
+    networks: [hostr]
+    environment:
+      CLICKHOUSE_SKIP_USER_SETUP: "1"
+    ulimits:
+      nproc: 65535
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ${HOSTR_STACK_ROOT:-.}/templates/dokploy/saas-core/clickhouse-cluster.xml:/etc/clickhouse-server/config.d/cluster.xml:ro
+    depends_on:
+      zookeeper:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "0.0.0.0:8123/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  zookeeper:
+    image: zookeeper:3.9
+    restart: unless-stopped
+    networks: [hostr]
+    environment:
+      ALLOW_ANONYMOUS_LOGIN: "yes"
+      ZOO_4LW_COMMANDS_WHITELIST: ruok
+    volumes:
+      - zookeeper_data:/data
+
+  otel-collector:
+    image: signoz/signoz-otel-collector:v0.129.7
+    restart: unless-stopped
+    networks: [hostr]
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ${HOSTR_STACK_ROOT:-.}/templates/dokploy/saas-core/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    depends_on:
+      signoz:
+        condition: service_started
+      schema-migrator-sync:
+        condition: service_completed_successfully
+
+  schema-migrator-sync:
+    image: signoz/signoz-schema-migrator:v0.129.7
+    restart: on-failure
+    networks: [hostr]
+    command: ["sync", "--dsn=tcp://clickhouse:9000", "--up=", "--cluster-name=cluster"]
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+
+  schema-migrator-async:
+    image: signoz/signoz-schema-migrator:v0.129.7
+    restart: on-failure
+    networks: [hostr]
+    command: ["async", "--dsn=tcp://clickhouse:9000", "--up=", "--cluster-name=cluster"]
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      schema-migrator-sync:
+        condition: service_completed_successfully
+
+volumes:
+  signoz_sqlite:
+    name: hostr-saas-signoz-sqlite
+  clickhouse_data:
+    name: hostr-saas-clickhouse-data
+  zookeeper_data:
+    name: hostr-saas-zookeeper-data
