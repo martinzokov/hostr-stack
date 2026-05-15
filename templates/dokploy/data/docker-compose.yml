@@ -2,8 +2,8 @@ name: hostr-data
 
 networks:
   hostr:
-    external: true
     name: hostr-network
+    driver: bridge
 
 services:
   postgres:

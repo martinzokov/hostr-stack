@@ -12,6 +12,7 @@ Usage:
   bin/hostr-stack validate
   bin/hostr-stack deploy
   bin/hostr-stack smoke
+  bin/hostr-stack info
 
 Environment:
   Configure .env from .env.example. deploy requires DOKPLOY_DOMAIN,
@@ -42,13 +43,6 @@ load_env() {
     . "$ENV_FILE"
     set +a
   fi
-}
-
-signoz_enabled() {
-  case "${ENABLE_SIGNOZ:-false}" in
-    1|true|TRUE|yes|YES|on|ON) return 0 ;;
-  esac
-  return 1
 }
 
 write_default_env() {
@@ -103,11 +97,7 @@ init_env() {
   [ -n "${POSTGRES_PASSWORD:-}" ] || set_env_value POSTGRES_PASSWORD "$(random_hex 24)"
   [ -n "${UMAMI_APP_SECRET:-}" ] || set_env_value UMAMI_APP_SECRET "$(random_secret 32)"
   [ -n "${LOGTO_COOKIE_SECRET:-}" ] || set_env_value LOGTO_COOKIE_SECRET "$(random_secret 32)"
-  if signoz_enabled; then
-    [ -n "${SIGNOZ_JWT_SECRET:-}" ] || set_env_value SIGNOZ_JWT_SECRET "$(random_secret 32)"
-    [ -n "${OTEL_EXPORTER_OTLP_ENDPOINT:-}" ] || set_env_value OTEL_EXPORTER_OTLP_ENDPOINT "http://otel-collector:4318"
-  fi
-  [ -n "${USESEND_NEXTAUTH_SECRET:-}" ] || set_env_value USESEND_NEXTAUTH_SECRET "$(random_secret 32)"
+[ -n "${USESEND_NEXTAUTH_SECRET:-}" ] || set_env_value USESEND_NEXTAUTH_SECRET "$(random_secret 32)"
   [ -n "${MINIO_ROOT_PASSWORD:-}" ] || set_env_value MINIO_ROOT_PASSWORD "$(random_secret 24)"
 
   echo "Initialized $ENV_FILE"
@@ -200,6 +190,35 @@ for project in d.get('result', {}).get('data', {}).get('json', []):
 " 2>/dev/null || true
 }
 
+wait_for_deploy() {
+  local compose_id="$1"
+  local label="${2:-$compose_id}"
+  local attempts=0
+  printf "Waiting for %s to be ready" "$label"
+  while [ $attempts -lt 24 ]; do
+    local status
+    status="$(curl -fsS \
+      "https://${DOKPLOY_DOMAIN%/}/api/trpc/compose.one?input=$(python3 -c \
+        "import json,urllib.parse; print(urllib.parse.quote(json.dumps({'json':{'composeId':'$compose_id'}})))")" \
+      -H "x-api-key: $DOKPLOY_API_KEY" \
+      | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print(d.get('result',{}).get('data',{}).get('json',{}).get('composeStatus',''))
+" 2>/dev/null || echo "")"
+    case "$status" in
+      done)  printf " done\n"; return 0 ;;
+      error) printf " error\n"; echo "Deploy failed for $label" >&2; return 1 ;;
+    esac
+    printf "."
+    sleep 5
+    attempts=$((attempts + 1))
+  done
+  printf " timeout\n"
+  echo "Timed out waiting for $label" >&2
+  return 1
+}
+
 deploy_one() {
   local name="$1"
   local template="$2"
@@ -248,10 +267,10 @@ deploy() {
 
   local id
 
-  # hostr-data (postgres)
+  # hostr-data (postgres + creates hostr-network)
   id="$(deploy_one "hostr-data" "$TEMPLATES_DIR/data/docker-compose.yml")"
   api_post compose.deploy "{\"json\":{\"composeId\":\"$id\"}}" >/dev/null
-  echo "Deployed hostr-data"
+  wait_for_deploy "$id" "hostr-data"
 
   # hostr-logto
   id="$(deploy_one "hostr-logto" "$TEMPLATES_DIR/logto/docker-compose.yml")"
@@ -278,14 +297,6 @@ deploy() {
   api_post compose.deploy "{\"json\":{\"composeId\":\"$id\"}}" >/dev/null
   echo "Deployed hostr-app"
 
-  # hostr-signoz (optional)
-  if signoz_enabled; then
-    id="$(deploy_one "hostr-signoz" "$TEMPLATES_DIR/signoz/docker-compose.yml")"
-    create_domain "$id" signoz 8080 "${SIGNOZ_DOMAIN:-}"
-    api_post compose.deploy "{\"json\":{\"composeId\":\"$id\"}}" >/dev/null
-    echo "Deployed hostr-signoz"
-  fi
-
   echo "All services deployed"
 }
 
@@ -299,10 +310,7 @@ smoke() {
     "umami:https://${UMAMI_DOMAIN:-}"
     "usesend:https://${USESEND_DOMAIN:-}"
   )
-  if signoz_enabled; then
-    pairs+=("signoz:https://${SIGNOZ_DOMAIN:-}")
-  fi
-  for pair in "${pairs[@]}"; do
+for pair in "${pairs[@]}"; do
     local name="${pair%%:*}"
     local url="${pair#*:}"
     if [ "$url" = "https://" ]; then
@@ -319,12 +327,39 @@ smoke() {
   exit "$failures"
 }
 
+info() {
+  load_env
+  cat <<WARNING
+⚠  SENSITIVE — store these values securely (password manager, secrets vault).
+   Do not share or commit them.
+
+WARNING
+  cat <<INFO
+=== Dokploy ===
+  URL:            https://${DOKPLOY_DOMAIN:-<not set>}
+  API Key:        ${DOKPLOY_API_KEY:-<not set>}
+  Environment ID: ${DOKPLOY_ENVIRONMENT_ID:-<not set>}
+
+=== Service URLs ===
+  App:            https://${APP_DOMAIN:-<not set>}
+  Auth (Logto):   https://${LOGTO_DOMAIN:-<not set>}
+  Auth Admin:     https://${LOGTO_ADMIN_DOMAIN:-<not set>}
+  Analytics:      https://${UMAMI_DOMAIN:-<not set>}
+  Email:          https://${USESEND_DOMAIN:-<not set>}
+
+=== Logto App Credentials ===
+  App ID:         ${LOGTO_APP_ID:-<not set — complete post-deploy wiring>}
+  App Secret:     ${LOGTO_APP_SECRET:-<not set — complete post-deploy wiring>}
+INFO
+}
+
 cmd="${1:-}"
 case "$cmd" in
   init) shift; init_env "$@" ;;
   validate) validate ;;
   deploy) deploy ;;
   smoke) smoke ;;
+  info) info ;;
   -h|--help|help|"") usage ;;
   *) echo "Unknown command: $cmd" >&2; usage; exit 1 ;;
 esac
