@@ -220,14 +220,20 @@ USESEND_DOMAIN=mail.example.com
 ```
 
 It preserves the existing `DOKPLOY_DOMAIN`, deploys updated service env, creates
-the new Dokploy domains, and runs smoke tests.
+the new Dokploy domains, and runs smoke tests. This is the safest path if the
+generated `nip.io` Dokploy URL is already working and you only want the product
+services on your real domain.
 
-If you have also moved the Dokploy panel itself to the new domain, pass it
+If you also want to move the Dokploy panel itself to the new domain, pass it
 explicitly:
 
 ```sh
 bin/hostr-stack domain --domain example.com --dokploy-domain dokploy.example.com
 ```
+
+With `--dokploy-domain`, the CLI rewrites Dokploy's Traefik route, updates
+Dokploy's Better Auth public URL, adds the new trusted origin, waits for the new
+HTTPS admin endpoint, and then deploys the service domains through that endpoint.
 
 To only update `.env` and deploy later:
 

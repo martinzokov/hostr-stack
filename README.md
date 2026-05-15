@@ -119,12 +119,18 @@ cd /opt/hostr-stack
 bin/hostr-stack domain --domain example.com
 ```
 
-That preserves the existing `DOKPLOY_DOMAIN` by default. If you also moved the
-Dokploy panel itself:
+That preserves the existing `DOKPLOY_DOMAIN` by default, so the Dokploy panel
+can stay on the generated `nip.io` host while the product services move to your
+domain. If you also want to move the Dokploy panel itself, pass the new admin
+host too:
 
 ```sh
 bin/hostr-stack domain --domain example.com --dokploy-domain dokploy.example.com
 ```
+
+When `--dokploy-domain` is set, the CLI rewrites the Dokploy Traefik route,
+updates Dokploy's Better Auth public URL, adds the new trusted origin, waits for
+the new HTTPS endpoint, then deploys the service domains.
 
 ## Manual Dokploy Setup
 

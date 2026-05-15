@@ -64,6 +64,10 @@ set_env_value() {
   fi
 }
 
+sql_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/''/g")"
+}
+
 remove_env_value() {
   local key="$1"
   if [ -f "$ENV_FILE" ]; then
@@ -109,6 +113,98 @@ init_env() {
   echo "Initialized $ENV_FILE"
 }
 
+dokploy_postgres_container() {
+  docker ps --filter name=dokploy-postgres --format '{{.ID}}' | head -n 1
+}
+
+write_dokploy_traefik_route() {
+  local dokploy_domain="$1"
+
+  mkdir -p /etc/dokploy/traefik/dynamic
+  cat >/etc/dokploy/traefik/dynamic/dokploy.yml <<EOF
+http:
+  routers:
+    dokploy-router-app:
+      rule: Host(\`$dokploy_domain\`) && PathPrefix(\`/\`)
+      service: dokploy-service-app
+      entryPoints:
+        - websecure
+      middlewares:
+        - gzip
+      tls:
+        certResolver: letsencrypt
+    dokploy-router-app-http:
+      rule: Host(\`$dokploy_domain\`) && PathPrefix(\`/\`)
+      service: dokploy-service-app
+      entryPoints:
+        - web
+      middlewares:
+        - redirect-to-https
+  services:
+    dokploy-service-app:
+      loadBalancer:
+        servers:
+          - url: http://dokploy:3000
+        passHostHeader: true
+EOF
+}
+
+restart_dokploy_traefik() {
+  if docker ps -a --format '{{.Names}}' | grep -qx dokploy-traefik; then
+    docker restart dokploy-traefik >/dev/null
+  elif docker service ls --format '{{.Name}}' | grep -qx dokploy-traefik; then
+    docker service update --force dokploy-traefik >/dev/null
+  fi
+}
+
+wait_for_url() {
+  local url="$1"
+  for _ in $(seq 1 60); do
+    if curl -fsS --max-time 10 "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 5
+  done
+  echo "Timed out waiting for $url" >&2
+  return 1
+}
+
+configure_dokploy_admin_domain() {
+  local dokploy_domain="$1"
+  local pg origin
+
+  need docker
+  need curl
+
+  echo "Configuring Dokploy admin domain at https://$dokploy_domain"
+  write_dokploy_traefik_route "$dokploy_domain"
+  restart_dokploy_traefik
+
+  docker service update \
+    --env-rm BETTER_AUTH_URL \
+    --env-rm NEXT_PUBLIC_BETTER_AUTH_URL \
+    dokploy >/dev/null 2>&1 || true
+  docker service update \
+    --env-add "BETTER_AUTH_URL=https://$dokploy_domain" \
+    --env-add "NEXT_PUBLIC_BETTER_AUTH_URL=https://$dokploy_domain" \
+    --force \
+    dokploy >/dev/null
+
+  wait_for_url "https://$dokploy_domain/api/health"
+
+  pg="$(dokploy_postgres_container)"
+  [ -n "$pg" ] || { echo "Could not find Dokploy postgres container." >&2; exit 1; }
+  origin="https://$dokploy_domain"
+  docker exec -i "$pg" psql -U dokploy -d dokploy >/dev/null <<SQL
+update "user"
+set "trustedOrigins" = (
+  select array_agg(distinct origin)
+  from unnest(coalesce("trustedOrigins", ARRAY[]::text[]) || ARRAY[$(sql_quote "$origin")]) as origin
+)
+where id = (select id from "user" order by created_at asc limit 1);
+SQL
+}
+
 domain() {
   local domain=""
   local dokploy_domain=""
@@ -130,6 +226,7 @@ domain() {
   init_env --domain "$domain" --keep-dokploy-domain
   if [ -n "$dokploy_domain" ]; then
     set_env_value DOKPLOY_DOMAIN "$dokploy_domain"
+    configure_dokploy_admin_domain "$dokploy_domain"
   fi
 
   echo "Updated service domains in $ENV_FILE"

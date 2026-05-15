@@ -268,6 +268,38 @@ wait_for_dokploy_https() {
   exit 1
 }
 
+configure_dokploy_public_auth_url() {
+  log "Configuring Dokploy public auth URL"
+  docker service update \
+    --env-rm BETTER_AUTH_URL \
+    --env-rm NEXT_PUBLIC_BETTER_AUTH_URL \
+    dokploy >/dev/null 2>&1 || true
+  docker service update \
+    --env-add "BETTER_AUTH_URL=https://$DOKPLOY_DOMAIN" \
+    --env-add "NEXT_PUBLIC_BETTER_AUTH_URL=https://$DOKPLOY_DOMAIN" \
+    --force \
+    dokploy >/dev/null
+}
+
+configure_dokploy_trusted_origins() {
+  local pg ip_origin https_ip_origin
+  pg="$(dokploy_postgres_container)"
+  ip_origin="http://$ip:3000"
+  https_ip_origin="https://$ip"
+
+  docker exec -i "$pg" psql -U dokploy -d dokploy >/dev/null <<SQL
+update "user"
+set "trustedOrigins" = (
+  select array_agg(distinct origin)
+  from unnest(
+    coalesce("trustedOrigins", ARRAY[]::text[]) ||
+    ARRAY[$(sql_quote "https://$DOKPLOY_DOMAIN"), $(sql_quote "$ip_origin"), $(sql_quote "$https_ip_origin")]
+  ) as origin
+)
+where id = (select id from "user" order by created_at asc limit 1);
+SQL
+}
+
 create_admin_if_needed() {
   local pg
   pg="$(dokploy_postgres_container)"
@@ -413,10 +445,12 @@ configure_dokploy_access() {
   case "$DOKPLOY_SETUP_MODE" in
     auto)
       create_admin_if_needed
+      configure_dokploy_trusted_origins
       bootstrap_dokploy_data
       ;;
     manual)
       manual_dokploy_setup
+      configure_dokploy_trusted_origins
       ;;
     *)
       echo "Unknown DOKPLOY_SETUP_MODE=$DOKPLOY_SETUP_MODE. Use auto or manual." >&2
@@ -475,6 +509,11 @@ block_raw_dokploy_port() {
   iptables -N DOCKER-USER 2>/dev/null || true
   iptables -C DOCKER-USER -p tcp --dport 3000 -j DROP 2>/dev/null || \
     iptables -I DOCKER-USER -p tcp --dport 3000 -j DROP
+  if command -v ip6tables >/dev/null 2>&1; then
+    ip6tables -N DOCKER-USER 2>/dev/null || true
+    ip6tables -C DOCKER-USER -p tcp --dport 3000 -j DROP 2>/dev/null || \
+      ip6tables -I DOCKER-USER -p tcp --dport 3000 -j DROP
+  fi
 }
 
 main() {
@@ -496,6 +535,8 @@ main() {
   wait_for_dokploy
   write_traefik_config
   ensure_traefik
+  configure_dokploy_public_auth_url
+  wait_for_dokploy
   wait_for_dokploy_https
   configure_dokploy_access
   write_runtime_env
