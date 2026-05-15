@@ -8,30 +8,13 @@ steps.
 
 ## How To Apply Changes
 
-There are two valid workflows.
-
-Recommended for repeatable setup:
-
-```sh
-cd /opt/hostr-stack
-edit .env
-bin/hostr-stack deploy
-bin/hostr-stack smoke
-```
-
-This keeps the repo `.env` as the source of truth and syncs the compose env into
-Dokploy.
-
-Fast path inside Dokploy:
-
 1. Open `https://dokploy.<domain>`.
 2. Open the relevant compose service.
 3. Update the environment variables in Dokploy.
 4. Click redeploy in Dokploy.
 
-This is fine for quick testing. If the change should survive a future CLI deploy,
-copy the same value back into `/opt/hostr-stack/.env`; otherwise the next
-`bin/hostr-stack deploy` can overwrite the Dokploy-side edit.
+For product wiring, Dokploy is the intended place to enter credentials. You
+should not need to SSH into the VPS or manually edit generated env files.
 
 ## What Still Needs Wiring
 
@@ -60,8 +43,7 @@ Redirect URI: https://app.<domain>/callback
 Post sign-out redirect URI: https://app.<domain>/
 ```
 
-Copy the application ID and secret into either `/opt/hostr-stack/.env` or the
-`hostr-app` compose environment in Dokploy:
+Open the `hostr-app` compose service in Dokploy and set:
 
 ```sh
 LOGTO_APP_ID=<logto-app-id>
@@ -86,8 +68,7 @@ the password immediately. Create a website for:
 app.<domain>
 ```
 
-Copy the website ID into `/opt/hostr-stack/.env` or the `hostr-app` compose
-environment in Dokploy:
+Open the `hostr-app` compose service in Dokploy and set:
 
 ```sh
 UMAMI_WEBSITE_ID=<umami-website-id>
@@ -114,8 +95,7 @@ Homepage URL: https://mail.<domain>
 Authorization callback URL: https://mail.<domain>/api/auth/callback/github
 ```
 
-Copy the client ID and secret into `/opt/hostr-stack/.env` or the `usesend`
-compose environment in Dokploy:
+Open the `usesend` compose service in Dokploy and set:
 
 ```sh
 USESEND_GITHUB_ID=<github-client-id>
@@ -138,8 +118,7 @@ In AWS:
 4. Create IAM credentials for useSend.
 5. Start broad enough to prove the flow, then narrow permissions for production.
 
-Set these in `/opt/hostr-stack/.env` or the `usesend` compose environment in
-Dokploy:
+Open the `usesend` compose service in Dokploy and set:
 
 ```sh
 AWS_DEFAULT_REGION=<aws-region>

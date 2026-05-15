@@ -235,7 +235,7 @@ With `--dokploy-domain`, the CLI rewrites Dokploy's Traefik route, updates
 Dokploy's Better Auth public URL, adds the new trusted origin, waits for the new
 HTTPS admin endpoint, and then deploys the service domains through that endpoint.
 
-To only update `.env` and deploy later:
+To only update generated service domains and deploy later:
 
 ```sh
 bin/hostr-stack domain --domain example.com --no-deploy
@@ -271,20 +271,15 @@ Minimum useful order:
 
 1. Complete Logto admin setup.
 2. Create the Logto app for the Next.js starter.
-3. Add `LOGTO_APP_ID` and `LOGTO_APP_SECRET` to `.env`.
-4. Redeploy and smoke test.
-5. Log into Umami, change the default password, create a website, and set `UMAMI_WEBSITE_ID`.
+3. Add `LOGTO_APP_ID` and `LOGTO_APP_SECRET` to the `hostr-app` compose env in Dokploy.
+4. Redeploy `hostr-app` in Dokploy.
+5. Log into Umami, change the default password, create a website, and set `UMAMI_WEBSITE_ID` on `hostr-app` in Dokploy.
 6. Configure useSend GitHub OAuth.
 7. Configure SES/SNS or your chosen email provider.
 8. Configure Logto email delivery.
 
-After each `.env` change:
-
-```sh
-bin/hostr-stack validate
-bin/hostr-stack deploy
-bin/hostr-stack smoke
-```
+For product credentials, use the Dokploy UI instead of manually editing the
+generated `.env` file on the VPS.
 
 ## 11. Bring Your Own App
 
@@ -347,5 +342,5 @@ bin/hostr-stack info
 ```
 
 Dokploy remains the source of truth for compose deployments and public HTTPS
-routes. The hostr-stack repo is the source of truth for templates, generated
-environment values, and backup/restore commands.
+routes. The hostr-stack repo is the source of truth for templates, installer
+logic, and backup/restore commands.

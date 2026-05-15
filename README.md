@@ -225,8 +225,8 @@ After deployment, complete product-level setup:
 1. Open Logto admin at `https://auth-admin.<domain>`.
 2. Create a Traditional Web App.
 3. Set the redirect URI to `https://app.<domain>/callback`.
-4. Add `LOGTO_APP_ID` and `LOGTO_APP_SECRET` to `.env`.
-5. Redeploy with `bin/hostr-stack deploy && bin/hostr-stack smoke`.
+4. Add `LOGTO_APP_ID` and `LOGTO_APP_SECRET` to the `hostr-app` compose env in Dokploy.
+5. Redeploy `hostr-app` from Dokploy.
 
 See [docs/post-deploy-wiring.md](docs/post-deploy-wiring.md) for Umami,
 useSend, AWS SES/SNS, and Logto email setup.
