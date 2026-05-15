@@ -1,367 +1,192 @@
 # Post-Deploy Wiring
 
-This stack deploys and serves over HTTPS after `bin/hostr-stack deploy`, but a few product-level integrations still need provider-specific credentials before the SaaS starter is fully usable.
+Use this after `install.sh` has finished and the stack is reachable over HTTPS.
+The installer already creates the Dokploy project/environment, deploys the
+compose services, configures domains, and runs smoke checks. This doc only covers
+product-level credentials that need third-party dashboards or first-run admin UI
+steps.
 
-Use this runbook after the stack is live and `bin/hostr-stack smoke` passes.
+## How To Apply Changes
 
-Recommended order:
+There are two valid workflows.
 
-1. Logto app credentials for the Next.js starter.
-2. Umami website tracking.
-3. useSend login.
-4. useSend email provider credentials.
-5. Logto email delivery.
-
-After changing any `.env` value, redeploy:
+Recommended for repeatable setup:
 
 ```sh
-bin/hostr-stack validate
+cd /opt/hostr-stack
+edit .env
 bin/hostr-stack deploy
 bin/hostr-stack smoke
 ```
 
-## Current Missing Pieces
+This keeps the repo `.env` as the source of truth and syncs the compose env into
+Dokploy.
 
-| Area | Why it is needed | Current placeholder |
+Fast path inside Dokploy:
+
+1. Open `https://dokploy.<domain>`.
+2. Open the relevant compose service.
+3. Update the environment variables in Dokploy.
+4. Click redeploy in Dokploy.
+
+This is fine for quick testing. If the change should survive a future CLI deploy,
+copy the same value back into `/opt/hostr-stack/.env`; otherwise the next
+`bin/hostr-stack deploy` can overwrite the Dokploy-side edit.
+
+## What Still Needs Wiring
+
+| Area | Where to configure | Values |
 | --- | --- | --- |
-| Logto application credentials | Lets the Next.js starter sign users in with Logto | `LOGTO_APP_ID=`, `LOGTO_APP_SECRET=` |
-| Umami website ID | Lets the starter app send analytics events to Umami | `UMAMI_WEBSITE_ID` unset |
-| useSend GitHub OAuth | Lets you log into useSend | `USESEND_GITHUB_ID=replace-with-github-client-id`, `USESEND_GITHUB_SECRET=replace-with-github-client-secret` |
-| useSend AWS SES/SNS credentials | Lets useSend send email and receive delivery/bounce status | `AWS_ACCESS_KEY=usesend-local`, `AWS_SECRET_KEY=usesend-local` |
-| Logto email connector | Enables production auth email flows such as verification and password reset | not configured |
+| Logto app for the starter | Logto Admin, then app compose env | `LOGTO_APP_ID`, `LOGTO_APP_SECRET` |
+| Umami tracking | Umami UI, then app compose env | `UMAMI_WEBSITE_ID` |
+| useSend login | GitHub OAuth app, then useSend compose env | `USESEND_GITHUB_ID`, `USESEND_GITHUB_SECRET` |
+| useSend sending | AWS SES/SNS and useSend UI | `AWS_DEFAULT_REGION`, `AWS_ACCESS_KEY`, `AWS_SECRET_KEY` |
+| Logto email | Logto Admin connector | provider/API or SMTP values |
 
-## 1. Logto App For The Next.js Starter
+## 1. Logto App
 
 Open:
 
 ```text
-https://auth-admin.<root-domain>
+https://auth-admin.<domain>
 ```
 
-For the verification VPS this was:
+Create a Traditional Web App in Logto.
+
+Use these URLs:
 
 ```text
-https://auth-admin.verify.178-105-108-173.nip.io
+Redirect URI: https://app.<domain>/callback
+Post sign-out redirect URI: https://app.<domain>/
 ```
 
-Steps:
-
-1. Complete the first-run Logto admin setup if it has not already been done.
-2. In Logto Console, create a new application.
-3. Choose a traditional web application.
-4. Name it something like `hostr-nextjs-starter`.
-5. Set the redirect URI:
-
-```text
-https://app.<root-domain>/callback
-```
-
-6. Set the post sign-out redirect URI:
-
-```text
-https://app.<root-domain>/
-```
-
-7. Copy the generated application ID and application secret.
-8. Put them in `.env`:
+Copy the application ID and secret into either `/opt/hostr-stack/.env` or the
+`hostr-app` compose environment in Dokploy:
 
 ```sh
 LOGTO_APP_ID=<logto-app-id>
 LOGTO_APP_SECRET=<logto-app-secret>
 ```
 
-9. Redeploy:
+Redeploy `hostr-app`. Expected result: the starter app sign-in button is enabled
+and redirects through `https://auth.<domain>`.
 
-```sh
-bin/hostr-stack deploy
-bin/hostr-stack smoke
-```
-
-Expected result:
-
-- `https://app.<root-domain>` shows an enabled sign-in button.
-- Clicking sign in redirects to `https://auth.<root-domain>`.
-- Successful login returns to `https://app.<root-domain>/callback`, then back to the app.
-
-Operational notes:
-
-- Keep the Logto admin account in a password manager.
-- The starter app intentionally disables the sign-in button until both `LOGTO_APP_ID` and `LOGTO_APP_SECRET` are set.
-- If sign-in loops or callback fails, re-check the redirect URI and post sign-out URI exactly.
-
-Automation assessment:
-
-- Automatable after Logto Management API access exists.
-- Not fully automatable from a clean install without either Logto admin credentials, a machine-to-machine Management API app, or direct database seeding.
-- Recommended future CLI command: `bin/hostr-stack wire logto --admin-email ...` or `bin/hostr-stack wire logto --management-token ...`.
-
-## 2. Umami Website Tracking
+## 2. Umami Tracking
 
 Open:
 
 ```text
-https://umami.<root-domain>
+https://umami.<domain>
 ```
 
-For the verification VPS this was:
+On a fresh Umami install, sign in with the default admin credentials and change
+the password immediately. Create a website for:
 
 ```text
-https://umami.verify.178-105-108-173.nip.io
+app.<domain>
 ```
 
-Steps:
-
-1. Sign into Umami. A fresh self-hosted Umami install creates `admin` / `umami`; change this password immediately.
-2. Create a website.
-3. Use a name like `hostr app`.
-4. Use the tracked domain:
-
-```text
-app.<root-domain>
-```
-
-5. Copy the website ID.
-6. Add it to `.env`:
+Copy the website ID into `/opt/hostr-stack/.env` or the `hostr-app` compose
+environment in Dokploy:
 
 ```sh
 UMAMI_WEBSITE_ID=<umami-website-id>
 ```
 
-7. Redeploy:
+Redeploy `hostr-app`. Expected result: the app renders the Umami script with the
+website ID and visits appear in Umami. Ad blockers can hide analytics during
+testing, so verify with a clean browser profile if needed.
 
-```sh
-bin/hostr-stack deploy
-```
+## 3. useSend Login
 
-Expected result:
+useSend self-hosted login uses GitHub OAuth.
 
-- The app renders Umami’s script with `data-website-id`.
-- Visits to `https://app.<root-domain>` appear in Umami.
-
-Operational notes:
-
-- Ad blockers often block analytics scripts, so verify with a clean browser profile if visits do not appear.
-- The app only renders the Umami script when `UMAMI_WEBSITE_ID` is present.
-
-Automation assessment:
-
-- Automatable with Umami API credentials.
-- Umami exposes self-hosted API endpoints under `/api`, including login and website creation.
-- Recommended future CLI command: `bin/hostr-stack wire umami --username ... --password ...`.
-
-## 3. useSend GitHub OAuth Login
-
-useSend requires GitHub OAuth for login in self-hosted mode.
-
-Open GitHub:
+Create a GitHub OAuth app at:
 
 ```text
 https://github.com/settings/developers
 ```
 
-Steps:
-
-1. Go to Developer settings.
-2. Go to OAuth Apps.
-3. Create a new OAuth app.
-4. Set application name:
+Use:
 
 ```text
-hostr useSend
+Homepage URL: https://mail.<domain>
+Authorization callback URL: https://mail.<domain>/api/auth/callback/github
 ```
 
-5. Set homepage URL:
-
-```text
-https://mail.<root-domain>
-```
-
-6. Set authorization callback URL:
-
-```text
-https://mail.<root-domain>/api/auth/callback/github
-```
-
-7. Register the app.
-8. Copy the client ID and generate/copy the client secret.
-9. Put them in `.env`:
+Copy the client ID and secret into `/opt/hostr-stack/.env` or the `usesend`
+compose environment in Dokploy:
 
 ```sh
 USESEND_GITHUB_ID=<github-client-id>
 USESEND_GITHUB_SECRET=<github-client-secret>
 ```
 
-10. Redeploy:
+Redeploy `usesend`. Expected result: `https://mail.<domain>` redirects to GitHub
+and returns to useSend after authorization.
 
-```sh
-bin/hostr-stack deploy
-```
+## 4. useSend Sending
 
-Expected result:
+useSend sends through AWS SES and uses SNS for delivery, bounce, and complaint
+events.
 
-- `https://mail.<root-domain>` loads the useSend UI.
-- Login redirects to GitHub.
-- GitHub redirects back to `/api/auth/callback/github`.
+In AWS:
 
-Operational notes:
+1. Pick an SES region.
+2. Verify your sending domain.
+3. Add the DNS records SES provides.
+4. Create IAM credentials for useSend.
+5. Start broad enough to prove the flow, then narrow permissions for production.
 
-- useSend is deployed before OAuth exists, so the service can be healthy while login is not yet usable.
-- Keep GitHub OAuth credentials out of git and store them only in `.env` or a secrets manager.
-
-Automation assessment:
-
-- Not reliably automatable through this repo alone.
-- GitHub OAuth App creation is normally done in the GitHub web UI under the user or organization that owns the app.
-- Browser automation is possible if an authenticated GitHub session is available, but it is brittle and account-specific.
-- Recommended automation boundary: keep creation manual, then automate `.env` update and redeploy once `USESEND_GITHUB_ID` and `USESEND_GITHUB_SECRET` are provided.
-
-## 4. useSend AWS SES/SNS Credentials
-
-useSend uses AWS SES to send mail and SNS for delivery/bounce events.
-
-AWS setup:
-
-1. Open the AWS console.
-2. Choose an SES region, usually the same region users are closest to. `us-east-1` is a reasonable default.
-3. Verify your sending domain in SES.
-4. Configure DNS records that SES gives you.
-5. Create an IAM user for useSend.
-6. Attach permissions that allow SES sending and SNS management. The useSend guide suggests `AmazonSESFullAccess` and `AmazonSNSFullAccess`; for production, narrow this later.
-7. Create an access key for that IAM user.
-8. Put the values in `.env`:
+Set these in `/opt/hostr-stack/.env` or the `usesend` compose environment in
+Dokploy:
 
 ```sh
 AWS_DEFAULT_REGION=<aws-region>
 AWS_ACCESS_KEY=<aws-access-key-id>
-AWS_SECRET_KEY=<aws-secret-access-key>
+AWS_SECRET_KEY=<secret-access-key>
 ```
 
-useSend setup:
-
-1. Sign into useSend at:
+Redeploy `usesend`, then finish the SES/SNS setup inside the useSend UI at:
 
 ```text
-https://mail.<root-domain>
+https://mail.<domain>
 ```
 
-2. Follow the in-app SES setup.
-3. Add the same AWS region.
-4. Add the callback URL when prompted. Use the public app URL:
+SES sandbox mode can block real recipient delivery until AWS grants production
+access.
 
-```text
-https://mail.<root-domain>
-```
+## 5. Logto Email
 
-5. Complete any SES/SNS DNS or webhook setup that useSend displays.
+This is required for real verification and password reset emails.
 
-Expected result:
+Recommended order:
 
-- useSend can create/verify sender domains.
-- useSend can send transactional email through SES.
-- Delivery events, bounces, and complaints can flow back through SNS.
+1. Finish useSend sending or choose another email provider.
+2. Create the API key or SMTP credentials in that provider.
+3. Open Logto Admin at `https://auth-admin.<domain>`.
+4. Configure an email connector.
+5. Send a test email from Logto.
 
-Operational notes:
-
-- SES sandbox mode can block real recipient delivery until AWS production access is approved.
-- Start with narrow IAM permissions after the first smoke test; broad SES/SNS permissions are only a bootstrap shortcut.
-
-Automation assessment:
-
-- Partially automatable if AWS credentials with IAM, SES, SNS, and Route 53 permissions are provided.
-- Not safe to automate by default because it can create IAM users, access keys, DNS records, SES identities, and SNS topics.
-- Recommended future CLI command: `bin/hostr-stack wire usesend-aws --profile ... --domain ... --region ...`, gated behind explicit confirmation.
-
-## 5. Logto Email Connector
-
-This is not required for the first sign-in smoke test, but it is required for a production auth system with email verification, password reset, and notification flows.
-
-Recommended approach:
-
-1. Finish useSend AWS setup first.
-2. In useSend, create an API key for transactional email.
-3. In Logto Admin, open Connectors.
-4. Configure an email connector that can send through your chosen provider.
-5. Use your verified sender domain.
-6. Test email delivery from Logto.
-
-Expected result:
-
-- New-user verification emails work.
-- Password reset emails work.
-- Logto email templates can be delivered from your own domain.
-
-Automation assessment:
-
-- Automatable only after both sides exist:
-  - a useSend API key or SMTP credentials
-  - Logto Management API access or admin UI automation
-- Recommended future CLI command: `bin/hostr-stack wire logto-email --usesend-api-key ...`.
-
-## Applying Changes
-
-After changing any `.env` value:
-
-```sh
-bin/hostr-stack validate
-bin/hostr-stack deploy
-bin/hostr-stack smoke
-```
-
-On the verification VPS, the deployed copy lives at:
-
-```sh
-ssh -i ~/.ssh/hetz root@178.105.108.173
-cd /opt/hostr-stack
-```
-
-Dokploy admin access must stay on HTTPS. The verification VPS uses:
-
-```text
-https://dokploy.178-105-108-173.nip.io
-```
-
-The Dokploy admin/API bootstrap values created during verification are stored root-only at:
-
-```text
-/root/dokploy-admin.env
-```
-
-Do not commit real `.env` values.
+Expected result: Logto can deliver verification and password reset emails from
+your domain.
 
 ## Readiness Checklist
 
 The stack is ready for product work when:
 
-- `bin/hostr-stack smoke` passes.
-- `bin/hostr-stack backup` writes `app.sql`, `logto.sql`, `umami.sql`, and `usesend.sql`.
+- `https://app.<domain>` loads.
 - Logto sign-in from the starter app works.
-- Umami has a non-default admin password and a website ID wired into `.env`.
-- useSend login works.
-- A transactional email provider is configured.
-- Logto password reset or verification email can be delivered.
-
-## Automation Roadmap
-
-| Task | Can automate? | Requirement |
-| --- | --- | --- |
-| Generate stack secrets | Already automated | `bin/hostr-stack init` |
-| Deploy compose and domains to Dokploy | Already automated | `DOKPLOY_DOMAIN`, `DOKPLOY_API_KEY`, `DOKPLOY_ENVIRONMENT_ID`; the CLI always uses HTTPS for Dokploy API access |
-| Build default Next.js image | Already automated | local Docker on the deployment host |
-| Create Logto app | Partially | Logto Management API token or admin credentials |
-| Update `LOGTO_APP_ID` / `LOGTO_APP_SECRET` and redeploy | Yes | values from Logto |
-| Create Umami website and set `UMAMI_WEBSITE_ID` | Yes | Umami username/password or API token |
-| Create GitHub OAuth app for useSend | Mostly manual | GitHub user/org ownership and UI flow |
-| Update useSend GitHub OAuth env and redeploy | Yes | GitHub OAuth client ID/secret |
-| Create AWS IAM/SES/SNS resources | Yes, but high-risk | AWS credentials and explicit confirmation |
-| Configure useSend SES in app | Partially | useSend session/API support |
-| Configure Logto email delivery | Partially | Logto API access plus email provider credentials |
+- Umami uses a non-default admin password and receives app visits.
+- useSend GitHub login works.
+- Transactional email sending works.
+- Logto verification or password reset email can be delivered.
+- `bin/hostr-stack backup` writes `app.sql`, `logto.sql`, `umami.sql`, and `usesend.sql`.
 
 ## References
 
 - Logto Next.js App Router quick start: https://docs.logto.io/quick-starts/next-app-router
-- Logto Management API application creation: https://bump.sh/logto/doc/logto-management-api/operation/operation-createapplication
-- Umami API overview and self-hosted API: https://umami.is/docs/api
-- Umami website API: https://docs.umami.is/docs/api/websites
+- Umami API docs: https://umami.is/docs/api
 - useSend self-hosting guide: https://docs.usesend.com/self-hosting/overview
 - GitHub OAuth app creation: https://docs.github.com/en/developers/apps/creating-an-oauth-app
 - AWS SES credentials: https://docs.aws.amazon.com/ses/latest/dg/smtp-credentials.html
