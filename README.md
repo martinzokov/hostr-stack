@@ -30,6 +30,12 @@ Fresh reset before retesting:
 curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/scripts/reset-vps.sh | YES=1 bash
 ```
 
+Optional manual Dokploy setup:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/install.sh | DOKPLOY_SETUP_MODE=manual bash
+```
+
 For a VPS that already has Dokploy reachable over HTTPS:
 
 ```sh
@@ -62,6 +68,24 @@ The tested path is:
 4. Store the one-time Dokploy admin credentials printed by the installer.
 
 See [docs/fresh-vps-setup.md](docs/fresh-vps-setup.md) for the exact commands and the post-deploy checklist.
+
+## Domains
+
+Before first deploy, `bin/hostr-stack init --domain example.com` sets both the
+service domains and `DOKPLOY_DOMAIN=dokploy.example.com`.
+
+After setup, use the dedicated domain command so the CLI keeps talking to the
+existing Dokploy panel while adding new service domains:
+
+```sh
+bin/hostr-stack domain --domain example.com
+```
+
+If you also moved the Dokploy panel domain:
+
+```sh
+bin/hostr-stack domain --domain example.com --dokploy-domain dokploy.example.com
+```
 
 ## Post-Deploy Wiring
 

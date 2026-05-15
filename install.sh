@@ -10,6 +10,7 @@ HOSTR_ENV_FILE="${HOSTR_ENV_FILE:-/root/hostr-stack.env}"
 DEPLOY_STACK="${DEPLOY_STACK:-1}"
 RUN_SMOKE="${RUN_SMOKE:-1}"
 BLOCK_DOKPLOY_PORT="${BLOCK_DOKPLOY_PORT:-1}"
+DOKPLOY_SETUP_MODE="${DOKPLOY_SETUP_MODE:-auto}"
 ADMIN_CREATED=0
 
 log() {
@@ -28,6 +29,30 @@ need() {
     echo "Missing required command: $1" >&2
     exit 1
   }
+}
+
+prompt_tty() {
+  local prompt="$1"
+  local var_name="$2"
+  local value=""
+  if [ -r /dev/tty ]; then
+    printf '%s' "$prompt" >/dev/tty
+    IFS= read -r value </dev/tty
+  else
+    echo "Cannot prompt without a TTY. Set $var_name and re-run." >&2
+    exit 1
+  fi
+  printf -v "$var_name" '%s' "$value"
+}
+
+wait_for_tty_enter() {
+  if [ -r /dev/tty ]; then
+    printf '%s' "$1" >/dev/tty
+    IFS= read -r _ </dev/tty
+  else
+    echo "Cannot wait for manual setup without a TTY." >&2
+    exit 1
+  fi
 }
 
 random_hex() {
@@ -70,7 +95,7 @@ install_packages() {
   log "Installing base packages"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
-  apt-get install -y ca-certificates curl git openssl python3 perl iptables
+  apt-get install -y ca-certificates curl git openssl python3 python3-bcrypt perl iptables
 }
 
 ensure_repo() {
@@ -249,8 +274,7 @@ create_admin_if_needed() {
   local count
   count="$(docker exec "$pg" psql -U dokploy -d dokploy -Atc 'select count(*) from "user";')"
   if [ "$count" != "0" ]; then
-    log "Dokploy admin already exists"
-    ADMIN_CREATED=0
+    rotate_existing_admin_password
     return
   fi
 
@@ -266,6 +290,46 @@ PY
     -X POST http://127.0.0.1:3000/api/auth/sign-up/email \
     -H 'content-type: application/json' \
     --data-binary @- >/dev/null
+  ADMIN_CREATED=1
+}
+
+bcrypt_password() {
+  PASSWORD="$1" python3 - <<'PY'
+import bcrypt
+import os
+
+password = os.environ["PASSWORD"].encode()
+print(bcrypt.hashpw(password, bcrypt.gensalt(rounds=10)).decode())
+PY
+}
+
+rotate_existing_admin_password() {
+  log "Dokploy admin already exists; rotating first admin password for auto-mode"
+  local pg user_id user_email password_hash account_id
+  pg="$(dokploy_postgres_container)"
+  user_id="$(docker exec "$pg" psql -U dokploy -d dokploy -Atc 'select id from "user" order by created_at asc limit 1;')"
+  user_email="$(docker exec "$pg" psql -U dokploy -d dokploy -Atc "select email from \"user\" where id = $(sql_quote "$user_id");")"
+  [ -n "$user_id" ] && [ -n "$user_email" ] || {
+    echo "Could not discover existing Dokploy admin user." >&2
+    exit 1
+  }
+
+  ADMIN_EMAIL="$user_email"
+  password_hash="$(bcrypt_password "$ADMIN_PASSWORD")"
+  account_id="hostr-account-$(random_hex 8)"
+
+  docker exec -i "$pg" psql -U dokploy -d dokploy >/dev/null <<SQL
+update account
+set password = $(sql_quote "$password_hash"), updated_at = now()
+where user_id = $(sql_quote "$user_id") and provider_id = 'credential';
+
+insert into account (id, account_id, provider_id, user_id, password, "is2FAEnabled", created_at, updated_at)
+select $(sql_quote "$account_id"), $(sql_quote "$user_id"), 'credential', $(sql_quote "$user_id"), $(sql_quote "$password_hash"), false, now(), now()
+where not exists (
+  select 1 from account where user_id = $(sql_quote "$user_id") and provider_id = 'credential'
+);
+SQL
+
   ADMIN_CREATED=1
 }
 
@@ -313,6 +377,63 @@ values ($(sql_quote "$key_id"), 'hostr-stack-cli', $(sql_quote "${API_KEY:0:6}")
 SQL
 
   DOKPLOY_ENVIRONMENT_ID="$environment_id"
+}
+
+manual_dokploy_setup() {
+  log "Waiting for manual Dokploy setup"
+  cat <<EOF
+
+Open Dokploy and complete setup manually:
+
+  https://$DOKPLOY_DOMAIN
+
+Create:
+1. The first admin account.
+2. A Dokploy API key.
+3. A project, for example "$PROJECT_NAME".
+4. An environment, for example "$ENVIRONMENT_NAME".
+
+Then paste the API key and environment ID back here.
+EOF
+
+  wait_for_tty_enter "Press Enter when the Dokploy admin, API key, project, and environment are ready..."
+
+  API_KEY="${DOKPLOY_API_KEY:-}"
+  DOKPLOY_ENVIRONMENT_ID="${DOKPLOY_ENVIRONMENT_ID:-}"
+
+  while [ -z "$API_KEY" ]; do
+    prompt_tty "Dokploy API key: " API_KEY
+  done
+  while [ -z "$DOKPLOY_ENVIRONMENT_ID" ]; do
+    prompt_tty "Dokploy environment ID: " DOKPLOY_ENVIRONMENT_ID
+  done
+
+  local entered_email=""
+  prompt_tty "Dokploy admin email (optional, press Enter to keep $ADMIN_EMAIL): " entered_email
+  if [ -n "$entered_email" ]; then
+    ADMIN_EMAIL="$entered_email"
+  fi
+
+  log "Verifying manual Dokploy API access"
+  curl -fsS "https://${DOKPLOY_DOMAIN%/}/api/trpc/project.all" \
+    -H "x-api-key: $API_KEY" >/dev/null
+  ADMIN_CREATED=0
+}
+
+configure_dokploy_access() {
+  case "$DOKPLOY_SETUP_MODE" in
+    auto)
+      create_admin_if_needed
+      bootstrap_dokploy_data
+      ;;
+    manual)
+      manual_dokploy_setup
+      ;;
+    *)
+      echo "Unknown DOKPLOY_SETUP_MODE=$DOKPLOY_SETUP_MODE. Use auto or manual." >&2
+      exit 1
+      ;;
+  esac
 }
 
 write_runtime_env() {
@@ -387,8 +508,7 @@ main() {
   write_traefik_config
   ensure_traefik
   wait_for_dokploy_https
-  create_admin_if_needed
-  bootstrap_dokploy_data
+  configure_dokploy_access
   write_runtime_env
   configure_hostr_env
   deploy_stack

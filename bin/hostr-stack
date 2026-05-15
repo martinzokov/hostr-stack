@@ -9,6 +9,7 @@ usage() {
   cat <<'USAGE'
 Usage:
   bin/hostr-stack init [--domain example.com]
+  bin/hostr-stack domain --domain example.com [--dokploy-domain dokploy.example.com] [--no-deploy] [--no-smoke]
   bin/hostr-stack validate
   bin/hostr-stack deploy
   bin/hostr-stack backup [--output .hostr/backups/YYYYmmddTHHMMSSZ]
@@ -75,9 +76,11 @@ init_env() {
   write_default_env
 
   local domain=""
+  local update_dokploy_domain=1
   while [ $# -gt 0 ]; do
     case "$1" in
       --domain) domain="${2:-}"; shift 2 ;;
+      --keep-dokploy-domain) update_dokploy_domain=0; shift ;;
       *) echo "Unknown init option: $1" >&2; exit 1 ;;
     esac
   done
@@ -85,7 +88,9 @@ init_env() {
   load_env
   if [ -n "$domain" ]; then
     set_env_value ROOT_DOMAIN "$domain"
-    set_env_value DOKPLOY_DOMAIN "dokploy.$domain"
+    if [ "$update_dokploy_domain" -eq 1 ]; then
+      set_env_value DOKPLOY_DOMAIN "dokploy.$domain"
+    fi
     remove_env_value DOKPLOY_URL
     set_env_value APP_DOMAIN "app.$domain"
     set_env_value LOGTO_DOMAIN "auth.$domain"
@@ -102,6 +107,40 @@ init_env() {
   [ -n "${MINIO_ROOT_PASSWORD:-}" ] || set_env_value MINIO_ROOT_PASSWORD "$(random_secret 24)"
 
   echo "Initialized $ENV_FILE"
+}
+
+domain() {
+  local domain=""
+  local dokploy_domain=""
+  local do_deploy=1
+  local do_smoke=1
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --domain) domain="${2:-}"; shift 2 ;;
+      --dokploy-domain) dokploy_domain="${2:-}"; shift 2 ;;
+      --no-deploy) do_deploy=0; shift ;;
+      --no-smoke) do_smoke=0; shift ;;
+      *) echo "Unknown domain option: $1" >&2; exit 1 ;;
+    esac
+  done
+
+  [ -n "$domain" ] || { echo "Usage: bin/hostr-stack domain --domain example.com [--dokploy-domain dokploy.example.com]" >&2; exit 1; }
+
+  init_env --domain "$domain" --keep-dokploy-domain
+  if [ -n "$dokploy_domain" ]; then
+    set_env_value DOKPLOY_DOMAIN "$dokploy_domain"
+  fi
+
+  echo "Updated service domains in $ENV_FILE"
+  if [ "$do_deploy" -eq 1 ]; then
+    deploy
+    if [ "$do_smoke" -eq 1 ]; then
+      smoke
+    fi
+  else
+    echo "Skipped deploy. Run bin/hostr-stack deploy to create Dokploy domains and update service env."
+  fi
 }
 
 validate() {
@@ -528,6 +567,7 @@ INFO
 cmd="${1:-}"
 case "$cmd" in
   init) shift; init_env "$@" ;;
+  domain) shift; domain "$@" ;;
   validate) validate ;;
   deploy) deploy ;;
   backup) shift; backup "$@" ;;

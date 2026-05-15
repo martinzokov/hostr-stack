@@ -67,6 +67,11 @@ At the end, the installer prints the Dokploy admin email and generated password
 once. Store those credentials immediately; the admin password is not written to
 disk.
 
+In auto-mode, if a Dokploy admin already exists from a partial previous run, the
+installer rotates that first admin user's password to the newly generated value
+and prints it. This keeps auto-mode recoverable without requiring manual
+database cleanup.
+
 ## 3. Run The Installer From A Checkout
 
 Copy or clone this repo onto the VPS, then run:
@@ -88,6 +93,7 @@ Useful installer options:
 ```sh
 ROOT_DOMAIN=example.com              # defaults to <server-ip-with-dashes>.nip.io
 DOKPLOY_DOMAIN=dokploy.example.com   # defaults to dokploy.$ROOT_DOMAIN
+DOKPLOY_SETUP_MODE=auto              # auto or manual
 ADMIN_EMAIL=admin@example.com        # defaults to admin@$ROOT_DOMAIN
 ADMIN_PASSWORD='...'                 # generated if omitted
 INSTALL_DIR=/opt/hostr-stack
@@ -108,7 +114,34 @@ That file contains the Dokploy URL, admin email, API key, environment ID, and
 root domain. It intentionally does not contain the Dokploy admin password.
 Treat it as a secret anyway because it contains the Dokploy API key.
 
-## 4. Reset A VPS Before Retesting
+## 4. Optional Manual Dokploy Setup
+
+Auto-mode is the default and is the recommended path:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/install.sh | bash
+```
+
+If you want to choose your own Dokploy admin account, API key, project, and
+environment in the Dokploy UI, use manual mode:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/install.sh | DOKPLOY_SETUP_MODE=manual bash
+```
+
+The installer still installs Dokploy and configures the HTTPS Dokploy panel.
+Then it waits while you:
+
+1. Open the printed Dokploy URL.
+2. Create the first admin account.
+3. Create a Dokploy API key.
+4. Create a project and environment.
+5. Paste the API key and environment ID back into the installer.
+
+Manual mode is useful when you do not want the installer to create the first
+Dokploy admin/API/project state through Dokploy internals.
+
+## 5. Reset A VPS Before Retesting
 
 If Dokploy logs you in immediately after a supposed reset, some Docker volume,
 Dokploy database, browser session, or repo/env state was left behind. Use the
@@ -130,7 +163,7 @@ networks, Docker Swarm state, `/etc/dokploy`, `/opt/hostr-stack`,
 not clear your browser cookies; use an incognito window if you want to confirm
 the login session is not browser-side.
 
-## 5. What The Installer Does
+## 6. What The Installer Does
 
 The script performs these steps:
 
@@ -149,7 +182,7 @@ The admin/API bootstrap uses Dokploy internals because Dokploy does not expose a
 single documented headless first-run setup command. Keep this script pinned in
 the repo and re-test it when upgrading Dokploy.
 
-## 6. Expected Smoke Output
+## 7. Expected Smoke Output
 
 ```text
 [ok] app https://app.example.com
@@ -162,7 +195,47 @@ the repo and re-test it when upgrading Dokploy.
 At this point the stack is deployed and serving over HTTPS, but product wiring
 is not complete yet.
 
-## 7. Take The First Backup
+## 8. Add Or Change Domains Later
+
+`bin/hostr-stack init --domain example.com` is safe before first deploy, but it
+also changes `DOKPLOY_DOMAIN` to `dokploy.example.com`. After setup, the CLI
+must keep talking to the current Dokploy panel unless you have also moved the
+panel domain.
+
+For post-install app/service domain changes, use:
+
+```sh
+cd /opt/hostr-stack
+bin/hostr-stack domain --domain example.com
+```
+
+That updates:
+
+```text
+APP_DOMAIN=app.example.com
+LOGTO_DOMAIN=auth.example.com
+LOGTO_ADMIN_DOMAIN=auth-admin.example.com
+UMAMI_DOMAIN=umami.example.com
+USESEND_DOMAIN=mail.example.com
+```
+
+It preserves the existing `DOKPLOY_DOMAIN`, deploys updated service env, creates
+the new Dokploy domains, and runs smoke tests.
+
+If you have also moved the Dokploy panel itself to the new domain, pass it
+explicitly:
+
+```sh
+bin/hostr-stack domain --domain example.com --dokploy-domain dokploy.example.com
+```
+
+To only update `.env` and deploy later:
+
+```sh
+bin/hostr-stack domain --domain example.com --no-deploy
+```
+
+## 9. Take The First Backup
 
 ```sh
 cd /opt/hostr-stack
@@ -184,7 +257,7 @@ Restore is explicit because it replaces database state:
 bin/hostr-stack restore .hostr/backups/<timestamp> --yes
 ```
 
-## 8. Wire Product Credentials
+## 10. Wire Product Credentials
 
 Follow [post-deploy-wiring.md](post-deploy-wiring.md).
 
@@ -207,7 +280,7 @@ bin/hostr-stack deploy
 bin/hostr-stack smoke
 ```
 
-## 9. Bring Your Own App
+## 11. Bring Your Own App
 
 The installer defaults to the bundled Next.js starter:
 
@@ -243,7 +316,7 @@ bin/hostr-stack deploy
 bin/hostr-stack smoke
 ```
 
-## 10. Manual Fallback
+## 12. Manual Fallback
 
 If the automated Dokploy bootstrap breaks after a Dokploy upgrade:
 
@@ -255,7 +328,7 @@ If the automated Dokploy bootstrap breaks after a Dokploy upgrade:
 6. Fill `.env` with `DOKPLOY_DOMAIN`, `DOKPLOY_API_KEY`, and `DOKPLOY_ENVIRONMENT_ID`.
 7. Run `bin/hostr-stack validate && bin/hostr-stack deploy && bin/hostr-stack smoke`.
 
-## 11. Operational Checks
+## 13. Operational Checks
 
 Useful checks on the VPS:
 
