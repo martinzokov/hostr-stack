@@ -1,3 +1,0 @@
-CREATE DATABASE logto;
-CREATE DATABASE umami;
-

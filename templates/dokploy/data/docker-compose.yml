@@ -16,7 +16,7 @@ services:
       POSTGRES_DB: app
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ${HOSTR_STACK_ROOT:-.}/templates/dokploy/saas-core/initdb:/docker-entrypoint-initdb.d:ro
+      - ${HOSTR_STACK_ROOT:-.}/templates/dokploy/data/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hostr -d app"]
       interval: 10s

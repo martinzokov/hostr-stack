@@ -7,7 +7,7 @@ networks:
 
 services:
   logto:
-    image: ghcr.io/logto-io/logto:latest
+    image: ghcr.io/logto-io/logto:1.39.0
     restart: unless-stopped
     networks: [hostr]
     entrypoint: ["sh", "-c", "npm run cli db seed -- --swe && npm start"]

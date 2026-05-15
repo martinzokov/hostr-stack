@@ -4,6 +4,22 @@ This stack deploys and serves over HTTPS after `bin/hostr-stack deploy`, but a f
 
 Use this runbook after the stack is live and `bin/hostr-stack smoke` passes.
 
+Recommended order:
+
+1. Logto app credentials for the Next.js starter.
+2. Umami website tracking.
+3. useSend login.
+4. useSend email provider credentials.
+5. Logto email delivery.
+
+After changing any `.env` value, redeploy:
+
+```sh
+bin/hostr-stack validate
+bin/hostr-stack deploy
+bin/hostr-stack smoke
+```
+
 ## Current Missing Pieces
 
 | Area | Why it is needed | Current placeholder |
@@ -67,6 +83,12 @@ Expected result:
 - Clicking sign in redirects to `https://auth.<root-domain>`.
 - Successful login returns to `https://app.<root-domain>/callback`, then back to the app.
 
+Operational notes:
+
+- Keep the Logto admin account in a password manager.
+- The starter app intentionally disables the sign-in button until both `LOGTO_APP_ID` and `LOGTO_APP_SECRET` are set.
+- If sign-in loops or callback fails, re-check the redirect URI and post sign-out URI exactly.
+
 Automation assessment:
 
 - Automatable after Logto Management API access exists.
@@ -89,7 +111,7 @@ https://umami.verify.178-105-108-173.nip.io
 
 Steps:
 
-1. Sign into Umami.
+1. Sign into Umami. A fresh self-hosted Umami install creates `admin` / `umami`; change this password immediately.
 2. Create a website.
 3. Use a name like `hostr app`.
 4. Use the tracked domain:
@@ -115,6 +137,11 @@ Expected result:
 
 - The app renders Umami’s script with `data-website-id`.
 - Visits to `https://app.<root-domain>` appear in Umami.
+
+Operational notes:
+
+- Ad blockers often block analytics scripts, so verify with a clean browser profile if visits do not appear.
+- The app only renders the Umami script when `UMAMI_WEBSITE_ID` is present.
 
 Automation assessment:
 
@@ -176,6 +203,11 @@ Expected result:
 - Login redirects to GitHub.
 - GitHub redirects back to `/api/auth/callback/github`.
 
+Operational notes:
+
+- useSend is deployed before OAuth exists, so the service can be healthy while login is not yet usable.
+- Keep GitHub OAuth credentials out of git and store them only in `.env` or a secrets manager.
+
 Automation assessment:
 
 - Not reliably automatable through this repo alone.
@@ -228,6 +260,11 @@ Expected result:
 - useSend can send transactional email through SES.
 - Delivery events, bounces, and complaints can flow back through SNS.
 
+Operational notes:
+
+- SES sandbox mode can block real recipient delivery until AWS production access is approved.
+- Start with narrow IAM permissions after the first smoke test; broad SES/SNS permissions are only a bootstrap shortcut.
+
 Automation assessment:
 
 - Partially automatable if AWS credentials with IAM, SES, SNS, and Route 53 permissions are provided.
@@ -274,7 +311,7 @@ On the verification VPS, the deployed copy lives at:
 
 ```sh
 ssh -i ~/.ssh/hetz root@178.105.108.173
-cd /opt/hostr-stack-verify
+cd /opt/hostr-stack
 ```
 
 Dokploy admin access must stay on HTTPS. The verification VPS uses:
@@ -290,6 +327,18 @@ The Dokploy admin/API bootstrap values created during verification are stored ro
 ```
 
 Do not commit real `.env` values.
+
+## Readiness Checklist
+
+The stack is ready for product work when:
+
+- `bin/hostr-stack smoke` passes.
+- `bin/hostr-stack backup` writes `app.sql`, `logto.sql`, `umami.sql`, and `usesend.sql`.
+- Logto sign-in from the starter app works.
+- Umami has a non-default admin password and a website ID wired into `.env`.
+- useSend login works.
+- A transactional email provider is configured.
+- Logto password reset or verification email can be delivered.
 
 ## Automation Roadmap
 

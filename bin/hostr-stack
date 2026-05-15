@@ -11,6 +11,8 @@ Usage:
   bin/hostr-stack init [--domain example.com]
   bin/hostr-stack validate
   bin/hostr-stack deploy
+  bin/hostr-stack backup [--output .hostr/backups/YYYYmmddTHHMMSSZ]
+  bin/hostr-stack restore <backup-dir> --yes
   bin/hostr-stack smoke
   bin/hostr-stack info
 
@@ -89,7 +91,6 @@ init_env() {
     set_env_value LOGTO_DOMAIN "auth.$domain"
     set_env_value LOGTO_ADMIN_DOMAIN "auth-admin.$domain"
     set_env_value UMAMI_DOMAIN "umami.$domain"
-    set_env_value SIGNOZ_DOMAIN "signoz.$domain"
     set_env_value USESEND_DOMAIN "mail.$domain"
   fi
 
@@ -97,7 +98,7 @@ init_env() {
   [ -n "${POSTGRES_PASSWORD:-}" ] || set_env_value POSTGRES_PASSWORD "$(random_hex 24)"
   [ -n "${UMAMI_APP_SECRET:-}" ] || set_env_value UMAMI_APP_SECRET "$(random_secret 32)"
   [ -n "${LOGTO_COOKIE_SECRET:-}" ] || set_env_value LOGTO_COOKIE_SECRET "$(random_secret 32)"
-[ -n "${USESEND_NEXTAUTH_SECRET:-}" ] || set_env_value USESEND_NEXTAUTH_SECRET "$(random_secret 32)"
+  [ -n "${USESEND_NEXTAUTH_SECRET:-}" ] || set_env_value USESEND_NEXTAUTH_SECRET "$(random_secret 32)"
   [ -n "${MINIO_ROOT_PASSWORD:-}" ] || set_env_value MINIO_ROOT_PASSWORD "$(random_secret 24)"
 
   echo "Initialized $ENV_FILE"
@@ -140,6 +141,28 @@ create_domain() {
   local host="$4"
 
   [ -n "$host" ] || return 0
+
+  if curl -fsS \
+    "https://${DOKPLOY_DOMAIN%/}/api/trpc/compose.one?input=$(python3 -c \
+      "import json,urllib.parse; print(urllib.parse.quote(json.dumps({'json':{'composeId':'$compose_id'}})))")" \
+    -H "x-api-key: $DOKPLOY_API_KEY" \
+    | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+domains = d.get('result', {}).get('data', {}).get('json', {}).get('domains', [])
+for domain in domains:
+    if (
+        domain.get('host') == '$host'
+        and domain.get('serviceName') == '$service_name'
+        and int(domain.get('port') or 0) == int('$port')
+        and domain.get('path', '/') == '/'
+    ):
+        raise SystemExit(0)
+raise SystemExit(1)
+" 2>/dev/null; then
+    echo "Domain already exists for $service_name:$port at $host" >&2
+    return 0
+  fi
 
   api_post domain.create \
     "{\"json\":{\"host\":\"$host\",\"path\":\"/\",\"port\":$port,\"https\":true,\"certificateType\":\"letsencrypt\",\"composeId\":\"$compose_id\",\"serviceName\":\"$service_name\",\"domainType\":\"compose\"}}" \
@@ -219,6 +242,141 @@ print(d.get('result',{}).get('data',{}).get('json',{}).get('composeStatus',''))
   return 1
 }
 
+resolve_context_path() {
+  local path="$1"
+  case "$path" in
+    /*) printf '%s\n' "$path" ;;
+    *) printf '%s/%s\n' "$ROOT_DIR" "$path" ;;
+  esac
+}
+
+resolve_dockerfile_path() {
+  local context_path="$1"
+  local dockerfile="${2:-Dockerfile}"
+  case "$dockerfile" in
+    /*) printf '%s\n' "$dockerfile" ;;
+    */*) printf '%s/%s\n' "$ROOT_DIR" "$dockerfile" ;;
+    *) printf '%s/%s\n' "$context_path" "$dockerfile" ;;
+  esac
+}
+
+build_app_image() {
+  load_env
+  [ -n "${APP_BUILD_CONTEXT:-}" ] || {
+    echo "Skipping app image build; APP_BUILD_CONTEXT is empty"
+    return 0
+  }
+
+  need docker
+  local context_path dockerfile_path image
+  context_path="$(resolve_context_path "$APP_BUILD_CONTEXT")"
+  dockerfile_path="$(resolve_dockerfile_path "$context_path" "${APP_DOCKERFILE:-Dockerfile}")"
+  image="${APP_IMAGE:-hostr-nextjs-starter:latest}"
+
+  [ -d "$context_path" ] || { echo "APP_BUILD_CONTEXT does not exist: $context_path" >&2; exit 1; }
+  [ -f "$dockerfile_path" ] || { echo "APP_DOCKERFILE does not exist: $dockerfile_path" >&2; exit 1; }
+
+  echo "Building app image $image from $context_path"
+  docker build -t "$image" -f "$dockerfile_path" "$context_path"
+}
+
+compose_exec() {
+  local template="$1"
+  local service="$2"
+  shift 2
+
+  local container_id
+  container_id="$(docker compose --env-file "$ENV_FILE" -f "$template" ps -q "$service" 2>/dev/null | head -n 1 || true)"
+  if [ -z "$container_id" ]; then
+    container_id="$(docker ps \
+      --filter "label=com.docker.compose.service=$service" \
+      --filter "name=compose-" \
+      --format '{{.ID}}' | head -n 1 || true)"
+  fi
+  [ -n "$container_id" ] || {
+    echo "Service container is not running: $service" >&2
+    return 1
+  }
+
+  docker exec -i "$container_id" "$@"
+}
+
+dump_database() {
+  local template="$1"
+  local service="$2"
+  local user="$3"
+  local database="$4"
+  local output="$5"
+
+  compose_exec "$template" "$service" \
+    pg_dump --clean --if-exists --username "$user" --dbname "$database" > "$output"
+}
+
+restore_database() {
+  local template="$1"
+  local service="$2"
+  local user="$3"
+  local database="$4"
+  local input="$5"
+
+  compose_exec "$template" "$service" dropdb --if-exists --force --username "$user" "$database"
+  compose_exec "$template" "$service" createdb --username "$user" "$database"
+  compose_exec "$template" "$service" psql --username "$user" --dbname "$database" --set ON_ERROR_STOP=on < "$input"
+}
+
+backup() {
+  need docker
+  load_env
+
+  local output=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --output) output="${2:-}"; shift 2 ;;
+      *) echo "Unknown backup option: $1" >&2; exit 1 ;;
+    esac
+  done
+
+  [ -n "$output" ] || output="$ROOT_DIR/.hostr/backups/$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p "$output"
+
+  echo "Backing up core Postgres databases to $output"
+  dump_database "$TEMPLATES_DIR/data/docker-compose.yml" postgres hostr app "$output/app.sql"
+  dump_database "$TEMPLATES_DIR/data/docker-compose.yml" postgres hostr logto "$output/logto.sql"
+  dump_database "$TEMPLATES_DIR/data/docker-compose.yml" postgres hostr umami "$output/umami.sql"
+
+  echo "Backing up useSend Postgres database to $output/usesend.sql"
+  dump_database "$TEMPLATES_DIR/usesend/docker-compose.yml" usesend-db usesend usesend "$output/usesend.sql"
+
+  echo "Backup written to $output"
+}
+
+restore() {
+  need docker
+  load_env
+
+  local backup_dir="${1:-}"
+  local yes="${2:-}"
+  [ -n "$backup_dir" ] || { echo "Usage: bin/hostr-stack restore <backup-dir> --yes" >&2; exit 1; }
+  [ "$yes" = "--yes" ] || {
+    echo "Restore is destructive. Re-run with: bin/hostr-stack restore $backup_dir --yes" >&2
+    exit 1
+  }
+  [ -f "$backup_dir/app.sql" ] || { echo "Missing backup file: $backup_dir/app.sql" >&2; exit 1; }
+  [ -f "$backup_dir/logto.sql" ] || { echo "Missing backup file: $backup_dir/logto.sql" >&2; exit 1; }
+  [ -f "$backup_dir/umami.sql" ] || { echo "Missing backup file: $backup_dir/umami.sql" >&2; exit 1; }
+  [ -f "$backup_dir/usesend.sql" ] || { echo "Missing backup file: $backup_dir/usesend.sql" >&2; exit 1; }
+
+  echo "Restoring core Postgres databases from $backup_dir"
+  restore_database "$TEMPLATES_DIR/data/docker-compose.yml" postgres hostr app "$backup_dir/app.sql"
+  restore_database "$TEMPLATES_DIR/data/docker-compose.yml" postgres hostr logto "$backup_dir/logto.sql"
+  restore_database "$TEMPLATES_DIR/data/docker-compose.yml" postgres hostr umami "$backup_dir/umami.sql"
+
+  echo "Restoring useSend Postgres database from $backup_dir/usesend.sql"
+  restore_database "$TEMPLATES_DIR/usesend/docker-compose.yml" usesend-db usesend usesend "$backup_dir/usesend.sql"
+
+  echo "Restore complete"
+}
+
 deploy_one() {
   local name="$1"
   local template="$2"
@@ -265,6 +423,8 @@ deploy() {
       exit 1 ;;
   esac
 
+  build_app_image
+
   local id
 
   # hostr-data (postgres + creates hostr-network)
@@ -277,25 +437,25 @@ deploy() {
   create_domain "$id" logto 3001 "${LOGTO_DOMAIN:-}"
   create_domain "$id" logto 3002 "${LOGTO_ADMIN_DOMAIN:-}"
   api_post compose.deploy "{\"json\":{\"composeId\":\"$id\"}}" >/dev/null
-  echo "Deployed hostr-logto"
+  wait_for_deploy "$id" "hostr-logto"
 
   # hostr-umami
   id="$(deploy_one "hostr-umami" "$TEMPLATES_DIR/umami/docker-compose.yml")"
   create_domain "$id" umami 3000 "${UMAMI_DOMAIN:-}"
   api_post compose.deploy "{\"json\":{\"composeId\":\"$id\"}}" >/dev/null
-  echo "Deployed hostr-umami"
+  wait_for_deploy "$id" "hostr-umami"
 
   # hostr-usesend
   id="$(deploy_one "hostr-usesend" "$TEMPLATES_DIR/usesend/docker-compose.yml")"
   create_domain "$id" usesend 3000 "${USESEND_DOMAIN:-}"
   api_post compose.deploy "{\"json\":{\"composeId\":\"$id\"}}" >/dev/null
-  echo "Deployed hostr-usesend"
+  wait_for_deploy "$id" "hostr-usesend"
 
   # hostr-app
   id="$(deploy_one "hostr-app" "$TEMPLATES_DIR/app/docker-compose.yml")"
   create_domain "$id" app 3000 "${APP_DOMAIN:-}"
   api_post compose.deploy "{\"json\":{\"composeId\":\"$id\"}}" >/dev/null
-  echo "Deployed hostr-app"
+  wait_for_deploy "$id" "hostr-app"
 
   echo "All services deployed"
 }
@@ -358,6 +518,8 @@ case "$cmd" in
   init) shift; init_env "$@" ;;
   validate) validate ;;
   deploy) deploy ;;
+  backup) shift; backup "$@" ;;
+  restore) shift; restore "$@" ;;
   smoke) smoke ;;
   info) info ;;
   -h|--help|help|"") usage ;;
