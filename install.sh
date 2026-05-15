@@ -2,12 +2,15 @@
 set -euo pipefail
 
 INSTALL_DIR="${INSTALL_DIR:-/opt/hostr-stack}"
+HOSTR_REPO_URL="${HOSTR_REPO_URL:-https://github.com/martinzokov/hostr-stack.git}"
+HOSTR_BRANCH="${HOSTR_BRANCH:-main}"
 PROJECT_NAME="${PROJECT_NAME:-hostr-stack}"
 ENVIRONMENT_NAME="${ENVIRONMENT_NAME:-production}"
-ADMIN_PASSWORD_FILE="${ADMIN_PASSWORD_FILE:-/root/dokploy-admin.env}"
+HOSTR_ENV_FILE="${HOSTR_ENV_FILE:-/root/hostr-stack.env}"
 DEPLOY_STACK="${DEPLOY_STACK:-1}"
 RUN_SMOKE="${RUN_SMOKE:-1}"
 BLOCK_DOKPLOY_PORT="${BLOCK_DOKPLOY_PORT:-1}"
+ADMIN_CREATED=0
 
 log() {
   printf '\n==> %s\n' "$*"
@@ -76,16 +79,15 @@ ensure_repo() {
     return
   fi
 
-  : "${HOSTR_REPO_URL:?Set HOSTR_REPO_URL when running install.sh outside a hostr-stack checkout}"
   log "Cloning hostr-stack into $INSTALL_DIR"
   mkdir -p "$(dirname "$INSTALL_DIR")"
   if [ -d "$INSTALL_DIR/.git" ]; then
     git -C "$INSTALL_DIR" fetch --all --prune
-    git -C "$INSTALL_DIR" checkout "${HOSTR_BRANCH:-main}"
+    git -C "$INSTALL_DIR" checkout "$HOSTR_BRANCH"
     git -C "$INSTALL_DIR" pull --ff-only
   else
     git clone "${HOSTR_REPO_URL}" "$INSTALL_DIR"
-    git -C "$INSTALL_DIR" checkout "${HOSTR_BRANCH:-main}"
+    git -C "$INSTALL_DIR" checkout "$HOSTR_BRANCH"
   fi
   cd "$INSTALL_DIR"
 }
@@ -236,6 +238,7 @@ create_admin_if_needed() {
   count="$(docker exec "$pg" psql -U dokploy -d dokploy -Atc 'select count(*) from "user";')"
   if [ "$count" != "0" ]; then
     log "Dokploy admin already exists"
+    ADMIN_CREATED=0
     return
   fi
 
@@ -251,6 +254,7 @@ PY
     -X POST http://127.0.0.1:3000/api/auth/sign-up/email \
     -H 'content-type: application/json' \
     --data-binary @- >/dev/null
+  ADMIN_CREATED=1
 }
 
 bootstrap_dokploy_data() {
@@ -299,14 +303,13 @@ SQL
   DOKPLOY_ENVIRONMENT_ID="$environment_id"
 }
 
-write_credentials() {
-  log "Writing credentials to $ADMIN_PASSWORD_FILE"
+write_runtime_env() {
+  log "Writing runtime deployment env to $HOSTR_ENV_FILE"
   umask 077
-  cat >"$ADMIN_PASSWORD_FILE" <<EOF
+  cat >"$HOSTR_ENV_FILE" <<EOF
 DOKPLOY_URL=https://$DOKPLOY_DOMAIN
 DOKPLOY_DOMAIN=$DOKPLOY_DOMAIN
 DOKPLOY_ADMIN_EMAIL=$ADMIN_EMAIL
-DOKPLOY_ADMIN_PASSWORD=$ADMIN_PASSWORD
 DOKPLOY_API_KEY=$API_KEY
 DOKPLOY_ENVIRONMENT_ID=$DOKPLOY_ENVIRONMENT_ID
 ROOT_DOMAIN=$ROOT_DOMAIN
@@ -374,7 +377,7 @@ main() {
   wait_for_dokploy_https
   create_admin_if_needed
   bootstrap_dokploy_data
-  write_credentials
+  write_runtime_env
   configure_hostr_env
   deploy_stack
   block_raw_dokploy_port
@@ -385,9 +388,33 @@ hostr-stack install complete.
 
 Dokploy: https://$DOKPLOY_DOMAIN
 App:     https://app.$ROOT_DOMAIN
+Auth:    https://auth.$ROOT_DOMAIN
+Admin:   https://auth-admin.$ROOT_DOMAIN
+Umami:   https://umami.$ROOT_DOMAIN
+Mail:    https://mail.$ROOT_DOMAIN
+EOF
 
-Credentials are stored on the VPS at:
-  $ADMIN_PASSWORD_FILE
+  if [ "$ADMIN_CREATED" = "1" ]; then
+    cat <<EOF
+Store these Dokploy admin credentials now. They are shown once and are not
+written to disk by this installer.
+
+Dokploy admin email:    $ADMIN_EMAIL
+Dokploy admin password: $ADMIN_PASSWORD
+
+EOF
+  else
+    cat <<'EOF'
+Dokploy already had an admin user, so this installer did not change or print an
+admin password. Use your existing Dokploy admin credentials, or run
+scripts/reset-vps.sh first for a completely fresh install.
+
+EOF
+  fi
+
+  cat <<EOF
+Deployment API values without the admin password were written to:
+  $HOSTR_ENV_FILE
 EOF
 }
 

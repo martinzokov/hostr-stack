@@ -41,7 +41,33 @@ mail.example.com        A     <server-ip>
 
 A wildcard `*.example.com` record also works.
 
-## 2. Run The Installer
+## 2. Run The Installer With curl
+
+Once the repo is public, the easiest fresh install is:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/install.sh | bash
+```
+
+For a real domain:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/install.sh | ROOT_DOMAIN=example.com bash
+```
+
+The installer clones `https://github.com/martinzokov/hostr-stack.git` into
+`/opt/hostr-stack` by default. For a fork:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/<owner>/hostr-stack/main/install.sh | \
+  HOSTR_REPO_URL=https://github.com/<owner>/hostr-stack.git ROOT_DOMAIN=example.com bash
+```
+
+At the end, the installer prints the Dokploy admin email and generated password
+once. Store those credentials immediately; the admin password is not written to
+disk.
+
+## 3. Run The Installer From A Checkout
 
 Copy or clone this repo onto the VPS, then run:
 
@@ -57,14 +83,6 @@ cd /opt/hostr-stack
 ./install.sh
 ```
 
-If you are running `install.sh` outside a checkout, provide the repo URL:
-
-```sh
-HOSTR_REPO_URL=https://github.com/<owner>/hostr-stack.git \
-ROOT_DOMAIN=example.com \
-bash install.sh
-```
-
 Useful installer options:
 
 ```sh
@@ -73,21 +91,46 @@ DOKPLOY_DOMAIN=dokploy.example.com   # defaults to dokploy.$ROOT_DOMAIN
 ADMIN_EMAIL=admin@example.com        # defaults to admin@$ROOT_DOMAIN
 ADMIN_PASSWORD='...'                 # generated if omitted
 INSTALL_DIR=/opt/hostr-stack
+HOSTR_REPO_URL=https://github.com/martinzokov/hostr-stack.git
+HOSTR_BRANCH=main
 DEPLOY_STACK=0                       # install/configure Dokploy only
 RUN_SMOKE=0                          # deploy but skip smoke tests
 BLOCK_DOKPLOY_PORT=0                 # leave raw :3000 reachable
 ```
 
-The installer stores generated credentials on the VPS:
+The installer stores deployment API values on the VPS:
 
 ```sh
-/root/dokploy-admin.env
+/root/hostr-stack.env
 ```
 
-That file contains the Dokploy URL, admin login, API key, environment ID, and
-root domain. Treat it as a secret.
+That file contains the Dokploy URL, admin email, API key, environment ID, and
+root domain. It intentionally does not contain the Dokploy admin password.
+Treat it as a secret anyway because it contains the Dokploy API key.
 
-## 3. What The Installer Does
+## 4. Reset A VPS Before Retesting
+
+If Dokploy logs you in immediately after a supposed reset, some Docker volume,
+Dokploy database, browser session, or repo/env state was left behind. Use the
+reset utility to remove the server-side state:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/scripts/reset-vps.sh | YES=1 bash
+```
+
+From a checkout:
+
+```sh
+YES=1 scripts/reset-vps.sh
+```
+
+This removes all Docker services, containers, images, volumes, user-defined
+networks, Docker Swarm state, `/etc/dokploy`, `/opt/hostr-stack`,
+`/root/hostr-stack.env`, and the older `/root/dokploy-admin.env` file. It does
+not clear your browser cookies; use an incognito window if you want to confirm
+the login session is not browser-side.
+
+## 5. What The Installer Does
 
 The script performs these steps:
 
@@ -106,7 +149,7 @@ The admin/API bootstrap uses Dokploy internals because Dokploy does not expose a
 single documented headless first-run setup command. Keep this script pinned in
 the repo and re-test it when upgrading Dokploy.
 
-## 4. Expected Smoke Output
+## 6. Expected Smoke Output
 
 ```text
 [ok] app https://app.example.com
@@ -119,7 +162,7 @@ the repo and re-test it when upgrading Dokploy.
 At this point the stack is deployed and serving over HTTPS, but product wiring
 is not complete yet.
 
-## 5. Take The First Backup
+## 7. Take The First Backup
 
 ```sh
 cd /opt/hostr-stack
@@ -141,7 +184,7 @@ Restore is explicit because it replaces database state:
 bin/hostr-stack restore .hostr/backups/<timestamp> --yes
 ```
 
-## 6. Wire Product Credentials
+## 8. Wire Product Credentials
 
 Follow [post-deploy-wiring.md](post-deploy-wiring.md).
 
@@ -164,7 +207,7 @@ bin/hostr-stack deploy
 bin/hostr-stack smoke
 ```
 
-## 7. Bring Your Own App
+## 9. Bring Your Own App
 
 The installer defaults to the bundled Next.js starter:
 
@@ -200,7 +243,7 @@ bin/hostr-stack deploy
 bin/hostr-stack smoke
 ```
 
-## 8. Manual Fallback
+## 10. Manual Fallback
 
 If the automated Dokploy bootstrap breaks after a Dokploy upgrade:
 
@@ -212,7 +255,7 @@ If the automated Dokploy bootstrap breaks after a Dokploy upgrade:
 6. Fill `.env` with `DOKPLOY_DOMAIN`, `DOKPLOY_API_KEY`, and `DOKPLOY_ENVIRONMENT_ID`.
 7. Run `bin/hostr-stack validate && bin/hostr-stack deploy && bin/hostr-stack smoke`.
 
-## 9. Operational Checks
+## 11. Operational Checks
 
 Useful checks on the VPS:
 

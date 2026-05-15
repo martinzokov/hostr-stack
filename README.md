@@ -18,12 +18,17 @@ For a fresh VPS, start with [docs/fresh-vps-setup.md](docs/fresh-vps-setup.md).
 Automated VPS install:
 
 ```sh
-cd /opt/hostr-stack
-ROOT_DOMAIN=example.com ./install.sh
+curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/install.sh | ROOT_DOMAIN=example.com bash
 ```
 
 For a playground VPS, `ROOT_DOMAIN` can be omitted and the installer will use
 `<server-ip-with-dashes>.nip.io`.
+
+Fresh reset before retesting:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/scripts/reset-vps.sh | YES=1 bash
+```
 
 For a VPS that already has Dokploy reachable over HTTPS:
 
@@ -53,9 +58,8 @@ The tested path is:
 
 1. Provision a VPS with public IPv4, at least 2GB RAM, and enough disk for Docker image builds.
 2. Point DNS records at the VPS, or use the default nip.io hostnames.
-3. Copy or clone this repo to `/opt/hostr-stack`.
-4. Run `ROOT_DOMAIN=example.com ./install.sh`.
-5. Read generated credentials from `/root/dokploy-admin.env`.
+3. Run the curl installer.
+4. Store the one-time Dokploy admin credentials printed by the installer.
 
 See [docs/fresh-vps-setup.md](docs/fresh-vps-setup.md) for the exact commands and the post-deploy checklist.
 
@@ -126,6 +130,7 @@ bin/hostr-stack restore .hostr/backups/<timestamp> --yes
 
 - `bin/hostr-stack`: CLI for initialization, validation, Dokploy deploy, smoke checks, and credentials output.
 - `install.sh`: fresh-VPS installer for Dokploy HTTPS, admin/API bootstrap, deploy, and smoke checks.
+- `scripts/reset-vps.sh`: destructive VPS reset utility for clean retests.
 - `templates/dokploy/`: Per-service Compose files deployed as separate Dokploy stacks.
 - `apps/nextjs-starter`: Minimal Next.js App Router starter with Logto auth integration.
 - `docs/fresh-vps-setup.md`: End-to-end setup from a new VPS to a live stack.
