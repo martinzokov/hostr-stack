@@ -95,7 +95,7 @@ install_packages() {
   log "Installing base packages"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
-  apt-get install -y ca-certificates curl git openssl python3 python3-bcrypt perl iptables
+  apt-get install -y ca-certificates curl git openssl python3 perl iptables
 }
 
 ensure_repo() {
@@ -293,20 +293,11 @@ PY
   ADMIN_CREATED=1
 }
 
-bcrypt_password() {
-  PASSWORD="$1" python3 - <<'PY'
-import bcrypt
-import os
-
-password = os.environ["PASSWORD"].encode()
-print(bcrypt.hashpw(password, bcrypt.gensalt(rounds=10)).decode())
-PY
-}
-
 rotate_existing_admin_password() {
   log "Dokploy admin already exists; rotating first admin password for auto-mode"
-  local pg user_id user_email password_hash account_id
+  local pg app user_id user_email reset_output reset_password
   pg="$(dokploy_postgres_container)"
+  app="$(dokploy_container)"
   user_id="$(docker exec "$pg" psql -U dokploy -d dokploy -Atc 'select id from "user" order by created_at asc limit 1;')"
   user_email="$(docker exec "$pg" psql -U dokploy -d dokploy -Atc "select email from \"user\" where id = $(sql_quote "$user_id");")"
   [ -n "$user_id" ] && [ -n "$user_email" ] || {
@@ -315,20 +306,18 @@ rotate_existing_admin_password() {
   }
 
   ADMIN_EMAIL="$user_email"
-  password_hash="$(bcrypt_password "$ADMIN_PASSWORD")"
-  account_id="hostr-account-$(random_hex 8)"
+  reset_output="$(docker exec "$app" node /app/dist/reset-password.mjs)"
+  reset_password="$(printf '%s\n' "$reset_output" | sed -n 's/^New password:[[:space:]]*//p' | tail -n1)"
+  [ -n "$reset_password" ] || {
+    echo "Dokploy password reset did not return a password." >&2
+    printf '%s\n' "$reset_output" >&2
+    exit 1
+  }
+  ADMIN_PASSWORD="$reset_password"
 
-  docker exec -i "$pg" psql -U dokploy -d dokploy >/dev/null <<SQL
-update account
-set password = $(sql_quote "$password_hash"), updated_at = now()
-where user_id = $(sql_quote "$user_id") and provider_id = 'credential';
-
-insert into account (id, account_id, provider_id, user_id, password, "is2FAEnabled", created_at, updated_at)
-select $(sql_quote "$account_id"), $(sql_quote "$user_id"), 'credential', $(sql_quote "$user_id"), $(sql_quote "$password_hash"), false, now(), now()
-where not exists (
-  select 1 from account where user_id = $(sql_quote "$user_id") and provider_id = 'credential'
-);
-SQL
+  if docker exec "$app" test -f /app/dist/reset-2fa.mjs; then
+    docker exec "$app" node /app/dist/reset-2fa.mjs >/dev/null || true
+  fi
 
   ADMIN_CREATED=1
 }
