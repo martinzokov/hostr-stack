@@ -201,6 +201,15 @@ EOF
 }
 
 ensure_traefik() {
+  if docker ps -a --format '{{.Names}}' | grep -qx dokploy-traefik; then
+    log "Reusing Dokploy Traefik container"
+    if docker service ls --format '{{.Name}}' | grep -qx dokploy-traefik; then
+      docker service rm dokploy-traefik >/dev/null 2>&1 || true
+    fi
+    docker restart dokploy-traefik >/dev/null
+    return
+  fi
+
   if docker service ls --format '{{.Name}}' | grep -qx dokploy-traefik; then
     docker service update --force dokploy-traefik >/dev/null
     return
