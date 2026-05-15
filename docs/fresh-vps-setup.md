@@ -31,8 +31,9 @@ https://mail.178-105-108-173.nip.io
 For a real domain, point these records at the VPS:
 
 ```text
+example.com             A     <server-ip>   # optional: app at apex
 dokploy.example.com     A     <server-ip>
-app.example.com         A     <server-ip>
+app.example.com         A     <server-ip>   # default app host
 auth.example.com        A     <server-ip>
 auth-admin.example.com  A     <server-ip>
 umami.example.com       A     <server-ip>
@@ -40,6 +41,8 @@ mail.example.com        A     <server-ip>
 ```
 
 A wildcard `*.example.com` record also works.
+It does not cover the apex record, so add `example.com` separately if you want
+the app at the apex domain.
 
 ## 2. Run The Installer With curl
 
@@ -93,6 +96,8 @@ Useful installer options:
 ```sh
 ROOT_DOMAIN=example.com              # defaults to <server-ip-with-dashes>.nip.io
 DOKPLOY_DOMAIN=dokploy.example.com   # defaults to dokploy.$ROOT_DOMAIN
+APEX_APP=0                           # set 1 to use ROOT_DOMAIN for the app
+APP_DOMAIN=app.example.com           # overrides the app host if set
 DOKPLOY_SETUP_MODE=auto              # auto or manual
 ADMIN_EMAIL=admin@example.com        # defaults to admin@$ROOT_DOMAIN
 ADMIN_PASSWORD='...'                 # generated if omitted
@@ -217,6 +222,18 @@ LOGTO_DOMAIN=auth.example.com
 LOGTO_ADMIN_DOMAIN=auth-admin.example.com
 UMAMI_DOMAIN=umami.example.com
 USESEND_DOMAIN=mail.example.com
+```
+
+To use the apex domain for the main app:
+
+```sh
+bin/hostr-stack domain --domain example.com --apex-app
+```
+
+That sets:
+
+```text
+APP_DOMAIN=example.com
 ```
 
 It preserves the existing `DOKPLOY_DOMAIN`, deploys updated service env, creates

@@ -39,9 +39,12 @@ Create a Traditional Web App in Logto.
 Use these URLs:
 
 ```text
-Redirect URI: https://app.<domain>/callback
-Post sign-out redirect URI: https://app.<domain>/
+Redirect URI: https://<app-domain>/callback
+Post sign-out redirect URI: https://<app-domain>/
 ```
+
+`<app-domain>` is `app.<domain>` by default. If you installed or later switched
+with `APEX_APP=1` / `--apex-app`, use the apex domain instead.
 
 Open the `hostr-app` compose service in Dokploy and set:
 
@@ -67,6 +70,8 @@ the password immediately. Create a website for:
 ```text
 app.<domain>
 ```
+
+If the app is on the apex domain, use the apex domain here instead.
 
 Open the `hostr-app` compose service in Dokploy and set:
 
@@ -154,7 +159,7 @@ your domain.
 
 The stack is ready for product work when:
 
-- `https://app.<domain>` loads.
+- `https://<app-domain>` loads.
 - Logto sign-in from the starter app works.
 - Umami uses a non-default admin password and receives app visits.
 - useSend GitHub login works.

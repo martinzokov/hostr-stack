@@ -104,12 +104,20 @@ curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/instal
 Create these records, or use a wildcard record:
 
 ```text
+example.com             A     <server-ip>   # optional: app at apex
 dokploy.example.com     A     <server-ip>
-app.example.com         A     <server-ip>
+app.example.com         A     <server-ip>   # default app host
 auth.example.com        A     <server-ip>
 auth-admin.example.com  A     <server-ip>
 umami.example.com       A     <server-ip>
 mail.example.com        A     <server-ip>
+```
+
+By default the app runs at `app.example.com`. To put the app on the apex domain
+from the start:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/install.sh | ROOT_DOMAIN=example.com APEX_APP=1 bash
 ```
 
 To add or change service domains after install:
@@ -117,6 +125,12 @@ To add or change service domains after install:
 ```sh
 cd /opt/hostr-stack
 bin/hostr-stack domain --domain example.com
+```
+
+To move the app to the apex domain after setup:
+
+```sh
+bin/hostr-stack domain --domain example.com --apex-app
 ```
 
 That preserves the existing `DOKPLOY_DOMAIN` by default, so the Dokploy panel
@@ -157,6 +171,8 @@ Available options:
 ```sh
 ROOT_DOMAIN=example.com
 DOKPLOY_DOMAIN=dokploy.example.com
+APEX_APP=0                           # set 1 to use ROOT_DOMAIN for the app
+APP_DOMAIN=app.example.com           # overrides the app host if set
 DOKPLOY_SETUP_MODE=auto              # auto or manual
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD='...'                 # generated if omitted
@@ -224,7 +240,7 @@ After deployment, complete product-level setup:
 
 1. Open Logto admin at `https://auth-admin.<domain>`.
 2. Create a Traditional Web App.
-3. Set the redirect URI to `https://app.<domain>/callback`.
+3. Set the redirect URI to `https://<app-domain>/callback`.
 4. Add `LOGTO_APP_ID` and `LOGTO_APP_SECRET` to the `hostr-app` compose env in Dokploy.
 5. Redeploy `hostr-app` from Dokploy.
 

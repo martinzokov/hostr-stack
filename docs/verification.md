@@ -65,7 +65,7 @@ Post-deploy Logto setup:
 
 1. Open `https://auth-admin.<domain>`.
 2. Create a traditional web application.
-3. Add redirect URI `https://app.<domain>/callback`.
-4. Add post sign-out redirect URI `https://app.<domain>/`.
-5. Put the generated app id and app secret into `LOGTO_APP_ID` and `LOGTO_APP_SECRET`.
-6. Redeploy from Dokploy or run `bin/hostr-stack deploy` again.
+3. Add redirect URI `https://<app-domain>/callback`.
+4. Add post sign-out redirect URI `https://<app-domain>/`.
+5. Put the generated app id and app secret into `LOGTO_APP_ID` and `LOGTO_APP_SECRET` on the `hostr-app` compose service in Dokploy.
+6. Redeploy `hostr-app` from Dokploy.

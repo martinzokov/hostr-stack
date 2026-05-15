@@ -474,7 +474,13 @@ EOF
 
 configure_hostr_env() {
   log "Configuring hostr-stack .env"
-  ./bin/hostr-stack init --domain "$ROOT_DOMAIN"
+  local init_args=(--domain "$ROOT_DOMAIN")
+  if [ "${APEX_APP:-0}" = "1" ]; then
+    init_args+=(--apex-app)
+  elif [ -n "${APP_DOMAIN:-}" ]; then
+    init_args+=(--app-domain "$APP_DOMAIN")
+  fi
+  ./bin/hostr-stack init "${init_args[@]}"
   set_env_value .env DOKPLOY_DOMAIN "$DOKPLOY_DOMAIN"
   set_env_value .env DOKPLOY_API_KEY "$API_KEY"
   set_env_value .env DOKPLOY_ENVIRONMENT_ID "$DOKPLOY_ENVIRONMENT_ID"
@@ -526,6 +532,13 @@ main() {
 
   ROOT_DOMAIN="${ROOT_DOMAIN:-$dashed_ip.nip.io}"
   DOKPLOY_DOMAIN="${DOKPLOY_DOMAIN:-dokploy.$ROOT_DOMAIN}"
+  if [ -z "${APP_DOMAIN:-}" ]; then
+    if [ "${APEX_APP:-0}" = "1" ]; then
+      APP_DOMAIN="$ROOT_DOMAIN"
+    else
+      APP_DOMAIN="app.$ROOT_DOMAIN"
+    fi
+  fi
   ADMIN_EMAIL="${ADMIN_EMAIL:-admin@$ROOT_DOMAIN}"
   ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(random_urlsafe 24)}"
 
@@ -549,7 +562,7 @@ main() {
 hostr-stack install complete.
 
 Dokploy: https://$DOKPLOY_DOMAIN
-App:     https://app.$ROOT_DOMAIN
+App:     https://$APP_DOMAIN
 Auth:    https://auth.$ROOT_DOMAIN
 Admin:   https://auth-admin.$ROOT_DOMAIN
 Umami:   https://umami.$ROOT_DOMAIN
