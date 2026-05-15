@@ -463,6 +463,8 @@ deploy() {
 smoke() {
   load_env
   local failures=0
+  local attempts="${SMOKE_ATTEMPTS:-24}"
+  local interval="${SMOKE_INTERVAL:-5}"
   local pairs=(
     "app:https://${APP_DOMAIN:-}"
     "logto:https://${LOGTO_DOMAIN:-}"
@@ -477,7 +479,17 @@ for pair in "${pairs[@]}"; do
       echo "[skip] $name domain not configured"
       continue
     fi
-    if curl -kfsS --max-time 15 "$url" >/dev/null; then
+
+    local ok=0
+    for attempt in $(seq 1 "$attempts"); do
+      if curl -kfsS --max-time 15 "$url" >/dev/null; then
+        ok=1
+        break
+      fi
+      [ "$attempt" -eq "$attempts" ] || sleep "$interval"
+    done
+
+    if [ "$ok" -eq 1 ]; then
       echo "[ok] $name $url"
     else
       echo "[fail] $name $url"

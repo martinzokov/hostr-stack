@@ -74,8 +74,11 @@ install_packages() {
 }
 
 ensure_repo() {
-  if [ -x "$(dirname "$0")/bin/hostr-stack" ]; then
-    cd "$(cd "$(dirname "$0")" && pwd)"
+  local script_dir=""
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P || true)"
+
+  if [ -n "$script_dir" ] && [ -f "$script_dir/install.sh" ] && [ -x "$script_dir/bin/hostr-stack" ]; then
+    cd "$script_dir"
     return
   fi
 
