@@ -43,8 +43,8 @@ Redirect URI: https://<app-domain>/callback
 Post sign-out redirect URI: https://<app-domain>/
 ```
 
-`<app-domain>` is `app.<domain>` by default. If you installed or later switched
-with `APEX_APP=1` / `--apex-app`, use the apex domain instead.
+`<app-domain>` is the apex domain by default, for example `example.com`. If you
+used `--app-domain`, use that host instead.
 
 Open the `hostr-app` compose service in Dokploy and set:
 
@@ -71,7 +71,7 @@ the password immediately. Create a website for:
 app.<domain>
 ```
 
-If the app is on the apex domain, use the apex domain here instead.
+Use the actual app domain here. By default that is the apex domain.
 
 Open the `hostr-app` compose service in Dokploy and set:
 

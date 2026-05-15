@@ -21,7 +21,7 @@ is `178.105.108.173`, the installer defaults to:
 
 ```text
 https://dokploy.178-105-108-173.nip.io
-https://app.178-105-108-173.nip.io
+https://178-105-108-173.nip.io
 https://auth.178-105-108-173.nip.io
 https://auth-admin.178-105-108-173.nip.io
 https://umami.178-105-108-173.nip.io
@@ -31,9 +31,8 @@ https://mail.178-105-108-173.nip.io
 For a real domain, point these records at the VPS:
 
 ```text
-example.com             A     <server-ip>   # optional: app at apex
+example.com             A     <server-ip>   # default app host
 dokploy.example.com     A     <server-ip>
-app.example.com         A     <server-ip>   # default app host
 auth.example.com        A     <server-ip>
 auth-admin.example.com  A     <server-ip>
 umami.example.com       A     <server-ip>
@@ -41,8 +40,7 @@ mail.example.com        A     <server-ip>
 ```
 
 A wildcard `*.example.com` record also works.
-It does not cover the apex record, so add `example.com` separately if you want
-the app at the apex domain.
+It does not cover the apex record, so add `example.com` separately for the main app.
 
 ## 2. Run The Installer With curl
 
@@ -96,8 +94,7 @@ Useful installer options:
 ```sh
 ROOT_DOMAIN=example.com              # defaults to <server-ip-with-dashes>.nip.io
 DOKPLOY_DOMAIN=dokploy.example.com   # defaults to dokploy.$ROOT_DOMAIN
-APEX_APP=0                           # set 1 to use ROOT_DOMAIN for the app
-APP_DOMAIN=app.example.com           # overrides the app host if set
+APP_DOMAIN=dashboard.example.com     # optional custom app host; default is ROOT_DOMAIN
 DOKPLOY_SETUP_MODE=auto              # auto or manual
 ADMIN_EMAIL=admin@example.com        # defaults to admin@$ROOT_DOMAIN
 ADMIN_PASSWORD='...'                 # generated if omitted
@@ -190,7 +187,7 @@ the repo and re-test it when upgrading Dokploy.
 ## 7. Expected Smoke Output
 
 ```text
-[ok] app https://app.example.com
+[ok] app https://example.com
 [ok] logto https://auth.example.com
 [ok] logto-admin https://auth-admin.example.com
 [ok] umami https://umami.example.com
@@ -217,24 +214,20 @@ bin/hostr-stack domain --domain example.com
 That updates:
 
 ```text
-APP_DOMAIN=app.example.com
+APP_DOMAIN=example.com
 LOGTO_DOMAIN=auth.example.com
 LOGTO_ADMIN_DOMAIN=auth-admin.example.com
 UMAMI_DOMAIN=umami.example.com
 USESEND_DOMAIN=mail.example.com
 ```
 
-To use the apex domain for the main app:
-
-```sh
-bin/hostr-stack domain --domain example.com --apex-app
-```
-
-That sets:
+By default the main app uses the apex domain:
 
 ```text
 APP_DOMAIN=example.com
 ```
+
+Use `--app-domain app.example.com` only if you want the app on a subdomain.
 
 It preserves the existing `DOKPLOY_DOMAIN`, deploys updated service env, creates
 the new Dokploy domains, and runs smoke tests. This is the safest path if the

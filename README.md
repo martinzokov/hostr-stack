@@ -34,7 +34,7 @@ The installer prints URLs like:
 
 ```text
 Dokploy: https://dokploy.<server-ip-with-dashes>.nip.io
-App:     https://app.<server-ip-with-dashes>.nip.io
+App:     https://<server-ip-with-dashes>.nip.io
 Auth:    https://auth.<server-ip-with-dashes>.nip.io
 Admin:   https://auth-admin.<server-ip-with-dashes>.nip.io
 Umami:   https://umami.<server-ip-with-dashes>.nip.io
@@ -104,21 +104,15 @@ curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/instal
 Create these records, or use a wildcard record:
 
 ```text
-example.com             A     <server-ip>   # optional: app at apex
+example.com             A     <server-ip>   # default app host
 dokploy.example.com     A     <server-ip>
-app.example.com         A     <server-ip>   # default app host
 auth.example.com        A     <server-ip>
 auth-admin.example.com  A     <server-ip>
 umami.example.com       A     <server-ip>
 mail.example.com        A     <server-ip>
 ```
 
-By default the app runs at `app.example.com`. To put the app on the apex domain
-from the start:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/install.sh | ROOT_DOMAIN=example.com APEX_APP=1 bash
-```
+By default the app runs at `example.com`.
 
 To add or change service domains after install:
 
@@ -127,11 +121,7 @@ cd /opt/hostr-stack
 bin/hostr-stack domain --domain example.com
 ```
 
-To move the app to the apex domain after setup:
-
-```sh
-bin/hostr-stack domain --domain example.com --apex-app
-```
+To use a subdomain for the app instead, pass `--app-domain app.example.com`.
 
 That preserves the existing `DOKPLOY_DOMAIN` by default, so the Dokploy panel
 can stay on the generated `nip.io` host while the product services move to your
@@ -171,8 +161,7 @@ Available options:
 ```sh
 ROOT_DOMAIN=example.com
 DOKPLOY_DOMAIN=dokploy.example.com
-APEX_APP=0                           # set 1 to use ROOT_DOMAIN for the app
-APP_DOMAIN=app.example.com           # overrides the app host if set
+APP_DOMAIN=dashboard.example.com     # optional custom app host; default is ROOT_DOMAIN
 DOKPLOY_SETUP_MODE=auto              # auto or manual
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD='...'                 # generated if omitted

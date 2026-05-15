@@ -8,8 +8,8 @@ TEMPLATES_DIR="$ROOT_DIR/templates/dokploy"
 usage() {
   cat <<'USAGE'
 Usage:
-  bin/hostr-stack init [--domain example.com] [--apex-app | --app-domain app.example.com]
-  bin/hostr-stack domain --domain example.com [--apex-app | --app-domain app.example.com] [--dokploy-domain dokploy.example.com] [--no-deploy] [--no-smoke]
+  bin/hostr-stack init [--domain example.com] [--app-domain dashboard.example.com]
+  bin/hostr-stack domain --domain example.com [--app-domain dashboard.example.com] [--dokploy-domain dokploy.example.com] [--no-deploy] [--no-smoke]
   bin/hostr-stack validate
   bin/hostr-stack deploy
   bin/hostr-stack backup [--output .hostr/backups/YYYYmmddTHHMMSSZ]
@@ -81,13 +81,11 @@ init_env() {
 
   local domain=""
   local app_domain=""
-  local apex_app=0
   local update_dokploy_domain=1
   while [ $# -gt 0 ]; do
     case "$1" in
       --domain) domain="${2:-}"; shift 2 ;;
       --app-domain) app_domain="${2:-}"; shift 2 ;;
-      --apex-app) apex_app=1; shift ;;
       --keep-dokploy-domain) update_dokploy_domain=0; shift ;;
       *) echo "Unknown init option: $1" >&2; exit 1 ;;
     esac
@@ -95,10 +93,7 @@ init_env() {
 
   load_env
   if [ -n "$domain" ]; then
-    if [ "$apex_app" -eq 1 ]; then
-      app_domain="$domain"
-    fi
-    [ -n "$app_domain" ] || app_domain="app.$domain"
+    [ -n "$app_domain" ] || app_domain="$domain"
     set_env_value ROOT_DOMAIN "$domain"
     if [ "$update_dokploy_domain" -eq 1 ]; then
       set_env_value DOKPLOY_DOMAIN "dokploy.$domain"
@@ -216,7 +211,6 @@ SQL
 domain() {
   local domain=""
   local app_domain=""
-  local apex_app=0
   local dokploy_domain=""
   local do_deploy=1
   local do_smoke=1
@@ -225,7 +219,6 @@ domain() {
     case "$1" in
       --domain) domain="${2:-}"; shift 2 ;;
       --app-domain) app_domain="${2:-}"; shift 2 ;;
-      --apex-app) apex_app=1; shift ;;
       --dokploy-domain) dokploy_domain="${2:-}"; shift 2 ;;
       --no-deploy) do_deploy=0; shift ;;
       --no-smoke) do_smoke=0; shift ;;
@@ -234,10 +227,7 @@ domain() {
   done
 
   [ -n "$domain" ] || { echo "Usage: bin/hostr-stack domain --domain example.com [--dokploy-domain dokploy.example.com]" >&2; exit 1; }
-  if [ "$apex_app" -eq 1 ]; then
-    app_domain="$domain"
-  fi
-  [ -n "$app_domain" ] || app_domain="app.$domain"
+  [ -n "$app_domain" ] || app_domain="$domain"
 
   init_env --domain "$domain" --app-domain "$app_domain" --keep-dokploy-domain
   if [ -n "$dokploy_domain" ]; then

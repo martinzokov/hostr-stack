@@ -265,6 +265,9 @@ wait_for_dokploy_https() {
     sleep 5
   done
   echo "Dokploy HTTPS did not become reachable at https://$DOKPLOY_DOMAIN." >&2
+  echo "Check that DNS for $DOKPLOY_DOMAIN points to $ip before running with a real domain." >&2
+  echo "Recent Traefik ACME logs:" >&2
+  docker logs --tail 40 dokploy-traefik 2>&1 | grep -iE 'acme|certificate|dns|error' >&2 || true
   exit 1
 }
 
@@ -475,9 +478,7 @@ EOF
 configure_hostr_env() {
   log "Configuring hostr-stack .env"
   local init_args=(--domain "$ROOT_DOMAIN")
-  if [ "${APEX_APP:-0}" = "1" ]; then
-    init_args+=(--apex-app)
-  elif [ -n "${APP_DOMAIN:-}" ]; then
+  if [ -n "${APP_DOMAIN:-}" ]; then
     init_args+=(--app-domain "$APP_DOMAIN")
   fi
   ./bin/hostr-stack init "${init_args[@]}"
@@ -533,11 +534,7 @@ main() {
   ROOT_DOMAIN="${ROOT_DOMAIN:-$dashed_ip.nip.io}"
   DOKPLOY_DOMAIN="${DOKPLOY_DOMAIN:-dokploy.$ROOT_DOMAIN}"
   if [ -z "${APP_DOMAIN:-}" ]; then
-    if [ "${APEX_APP:-0}" = "1" ]; then
-      APP_DOMAIN="$ROOT_DOMAIN"
-    else
-      APP_DOMAIN="app.$ROOT_DOMAIN"
-    fi
+    APP_DOMAIN="$ROOT_DOMAIN"
   fi
   ADMIN_EMAIL="${ADMIN_EMAIL:-admin@$ROOT_DOMAIN}"
   ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(random_urlsafe 24)}"
