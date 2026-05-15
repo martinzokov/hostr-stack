@@ -2,147 +2,90 @@
 
 SaaS-in-a-box bootstrap kit for a single VPS managed by Dokploy.
 
-Ships with:
+It installs and wires:
 
 - Auth: Logto
 - Database: Postgres
 - Analytics: Umami
 - Email: useSend
 - App: Next.js starter wired for Logto
-- SSL: handled by Dokploy domains through Traefik/Let's Encrypt
+- SSL: Dokploy + Traefik + Let's Encrypt
 
 ## Quick Start
 
-For a fresh VPS, start with [docs/fresh-vps-setup.md](docs/fresh-vps-setup.md).
+Use this path for a fresh playground VPS. You do not need a domain; the installer
+uses nip.io automatically.
 
-Automated VPS install:
+1. SSH into the VPS as root:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/install.sh | ROOT_DOMAIN=example.com bash
+ssh root@<server-ip>
 ```
 
-For a playground VPS, `ROOT_DOMAIN` can be omitted and the installer will use
-`<server-ip-with-dashes>.nip.io`.
+2. Run the installer:
 
-Fresh reset before retesting:
+```sh
+curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/install.sh | bash
+```
+
+3. Save the Dokploy admin credentials printed at the end.
+
+The installer prints URLs like:
+
+```text
+Dokploy: https://dokploy.<server-ip-with-dashes>.nip.io
+App:     https://app.<server-ip-with-dashes>.nip.io
+Auth:    https://auth.<server-ip-with-dashes>.nip.io
+Admin:   https://auth-admin.<server-ip-with-dashes>.nip.io
+Umami:   https://umami.<server-ip-with-dashes>.nip.io
+Mail:    https://mail.<server-ip-with-dashes>.nip.io
+```
+
+It also prints a generated Dokploy admin email/password. The password is shown
+once and is not written to disk.
+
+## Clean Retest
+
+To wipe the VPS Docker/Dokploy state before testing again:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/scripts/reset-vps.sh | YES=1 bash
 ```
 
-Optional manual Dokploy setup:
+Then rerun the installer.
+
+## What The Installer Does
+
+The default installer is auto-mode. It:
+
+1. Installs Docker/Dokploy dependencies.
+2. Installs Dokploy.
+3. Configures the Dokploy panel on HTTPS.
+4. Creates or rotates a Dokploy admin login and prints it once.
+5. Creates a Dokploy API key, project, and environment.
+6. Clones this repo to `/opt/hostr-stack`.
+7. Generates `.env`.
+8. Deploys all services through Dokploy.
+9. Runs smoke checks for app, auth, analytics, and email.
+
+Generated deployment API values are stored at:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/install.sh | DOKPLOY_SETUP_MODE=manual bash
+/root/hostr-stack.env
 ```
 
-For a VPS that already has Dokploy reachable over HTTPS:
+That file includes the Dokploy API key, but not the Dokploy admin password.
+
+## Common Commands
+
+From the installed repo:
 
 ```sh
-cp .env.example .env
-bin/hostr-stack init --domain example.com
-bin/hostr-stack validate
-bin/hostr-stack deploy
+cd /opt/hostr-stack
+bin/hostr-stack info
 bin/hostr-stack smoke
 bin/hostr-stack backup
-bin/hostr-stack info
 ```
-
-`deploy` expects an existing HTTPS-only Dokploy instance and these variables:
-
-```sh
-DOKPLOY_DOMAIN=dokploy.example.com
-DOKPLOY_API_KEY=...
-DOKPLOY_ENVIRONMENT_ID=...
-```
-
-Dokploy itself must be reachable over HTTPS before the stack deploy begins. Point DNS records for `dokploy`, `app`, `auth`, `auth-admin`, `umami`, and `mail` to the VPS before deployment. The CLI derives `https://$DOKPLOY_DOMAIN` and rejects `DOKPLOY_DOMAIN` values that include an `http://` or `https://` scheme.
-
-## Fresh VPS Setup
-
-The tested path is:
-
-1. Provision a VPS with public IPv4, at least 2GB RAM, and enough disk for Docker image builds.
-2. Point DNS records at the VPS, or use the default nip.io hostnames.
-3. Run the curl installer.
-4. Store the one-time Dokploy admin credentials printed by the installer.
-
-See [docs/fresh-vps-setup.md](docs/fresh-vps-setup.md) for the exact commands and the post-deploy checklist.
-
-## Domains
-
-Before first deploy, `bin/hostr-stack init --domain example.com` sets both the
-service domains and `DOKPLOY_DOMAIN=dokploy.example.com`.
-
-After setup, use the dedicated domain command so the CLI keeps talking to the
-existing Dokploy panel while adding new service domains:
-
-```sh
-bin/hostr-stack domain --domain example.com
-```
-
-If you also moved the Dokploy panel domain:
-
-```sh
-bin/hostr-stack domain --domain example.com --dokploy-domain dokploy.example.com
-```
-
-## Post-Deploy Wiring
-
-After `deploy` completes, a few credentials must be wired manually before the app is fully functional. See `docs/post-deploy-wiring.md`.
-
-The minimum path to a working sign-in:
-
-1. Open Logto admin at `https://auth-admin.<domain>` and complete first-run setup.
-2. Create a Traditional Web App, set the redirect URI to `https://app.<domain>/callback`.
-3. Copy the App ID and App Secret into `.env` as `LOGTO_APP_ID` and `LOGTO_APP_SECRET`.
-4. Redeploy: `bin/hostr-stack deploy && bin/hostr-stack smoke`.
-
-## CI/CD
-
-The included GitHub Actions workflow (`.github/workflows/deploy-app.yml`) builds and pushes the Next.js image to GHCR on every push to `main`, then triggers a Dokploy redeploy of the `hostr-app` stack.
-
-Required GitHub secrets: `DOKPLOY_DOMAIN`, `DOKPLOY_API_KEY`, `DOKPLOY_ENVIRONMENT_ID`, `DOKPLOY_COMPOSE_NAME` (value: `hostr-app`).
-
-For the CI/CD path, set in `.env`:
-
-```sh
-APP_IMAGE=ghcr.io/<owner>/<repo>/app:latest
-APP_PULL_POLICY=always
-APP_BUILD_CONTEXT=
-```
-
-## Bring Your Own App
-
-The template defaults to `apps/nextjs-starter`. If `APP_BUILD_CONTEXT` is set,
-`bin/hostr-stack deploy` builds `APP_IMAGE` before deploying `hostr-app`. This
-is best when the CLI runs on the VPS or against the same Docker daemon Dokploy
-uses.
-
-To use your own app from a local path on the VPS:
-
-```sh
-APP_BUILD_CONTEXT=./path/to/app
-APP_DOCKERFILE=Dockerfile
-APP_IMAGE=your-image:tag
-```
-
-To use an app from another repo or CI pipeline, build and push the image
-elsewhere, then leave `APP_BUILD_CONTEXT` empty:
-
-```sh
-APP_IMAGE=ghcr.io/<owner>/<repo>/app:latest
-APP_PULL_POLICY=always
-APP_BUILD_CONTEXT=
-```
-
-Your app receives: `LOGTO_*`, `DATABASE_URL`, `NEXT_PUBLIC_UMAMI_*`, `USESEND_API_URL`.
-
-## Backups
-
-`bin/hostr-stack backup` writes a timestamped backup directory under
-`.hostr/backups/` with dumps for the core Postgres service and the useSend
-Postgres service: `app.sql`, `logto.sql`, `umami.sql`, and `usesend.sql`.
 
 Restore is intentionally explicit because it replaces database state:
 
@@ -150,13 +93,167 @@ Restore is intentionally explicit because it replaces database state:
 bin/hostr-stack restore .hostr/backups/<timestamp> --yes
 ```
 
+## Use A Real Domain
+
+If you already have DNS pointed at the VPS:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/install.sh | ROOT_DOMAIN=example.com bash
+```
+
+Create these records, or use a wildcard record:
+
+```text
+dokploy.example.com     A     <server-ip>
+app.example.com         A     <server-ip>
+auth.example.com        A     <server-ip>
+auth-admin.example.com  A     <server-ip>
+umami.example.com       A     <server-ip>
+mail.example.com        A     <server-ip>
+```
+
+To add or change service domains after install:
+
+```sh
+cd /opt/hostr-stack
+bin/hostr-stack domain --domain example.com
+```
+
+That preserves the existing `DOKPLOY_DOMAIN` by default. If you also moved the
+Dokploy panel itself:
+
+```sh
+bin/hostr-stack domain --domain example.com --dokploy-domain dokploy.example.com
+```
+
+## Manual Dokploy Setup
+
+Auto-mode is the default. If you want to create the Dokploy admin/API
+key/project/environment yourself in the Dokploy UI:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/install.sh | DOKPLOY_SETUP_MODE=manual bash
+```
+
+The installer still installs Dokploy and configures HTTPS, then waits while you
+finish setup and paste back the API key and environment ID.
+
+## Installer Options
+
+Pass options as environment variables before `bash`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/install.sh | ROOT_DOMAIN=example.com RUN_SMOKE=0 bash
+```
+
+Available options:
+
+```sh
+ROOT_DOMAIN=example.com
+DOKPLOY_DOMAIN=dokploy.example.com
+DOKPLOY_SETUP_MODE=auto              # auto or manual
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD='...'                 # generated if omitted
+INSTALL_DIR=/opt/hostr-stack
+HOSTR_REPO_URL=https://github.com/martinzokov/hostr-stack.git
+HOSTR_BRANCH=main
+DEPLOY_STACK=0                       # install/configure Dokploy only
+RUN_SMOKE=0                          # deploy but skip smoke tests
+BLOCK_DOKPLOY_PORT=0                 # leave raw :3000 reachable
+```
+
+## Existing Dokploy
+
+If Dokploy is already reachable over HTTPS and you have an API key/environment:
+
+```sh
+cd /opt/hostr-stack
+cp .env.example .env
+bin/hostr-stack init --domain example.com
+```
+
+Set:
+
+```sh
+DOKPLOY_DOMAIN=dokploy.example.com
+DOKPLOY_API_KEY=...
+DOKPLOY_ENVIRONMENT_ID=...
+```
+
+Then deploy:
+
+```sh
+bin/hostr-stack validate
+bin/hostr-stack deploy
+bin/hostr-stack smoke
+```
+
+## Bring Your Own App
+
+The default app is `apps/nextjs-starter`.
+
+Use a local app path on the VPS:
+
+```sh
+APP_BUILD_CONTEXT=/opt/my-app
+APP_DOCKERFILE=Dockerfile
+APP_IMAGE=my-app:latest
+APP_PULL_POLICY=never
+```
+
+Or use an image built by CI:
+
+```sh
+APP_IMAGE=ghcr.io/<owner>/<repo>/app:latest
+APP_PULL_POLICY=always
+APP_BUILD_CONTEXT=
+```
+
+Your app receives `LOGTO_*`, `DATABASE_URL`, `NEXT_PUBLIC_UMAMI_*`, and
+`USESEND_API_URL`.
+
+## Post-Deploy Wiring
+
+After deployment, complete product-level setup:
+
+1. Open Logto admin at `https://auth-admin.<domain>`.
+2. Create a Traditional Web App.
+3. Set the redirect URI to `https://app.<domain>/callback`.
+4. Add `LOGTO_APP_ID` and `LOGTO_APP_SECRET` to `.env`.
+5. Redeploy with `bin/hostr-stack deploy && bin/hostr-stack smoke`.
+
+See [docs/post-deploy-wiring.md](docs/post-deploy-wiring.md) for Umami,
+useSend, AWS SES/SNS, and Logto email setup.
+
+## CI/CD
+
+The included GitHub Actions workflow builds and pushes the Next.js image to
+GHCR on every push to `main`, then triggers a Dokploy redeploy of `hostr-app`.
+
+Required GitHub secrets:
+
+```text
+DOKPLOY_DOMAIN
+DOKPLOY_API_KEY
+DOKPLOY_ENVIRONMENT_ID
+DOKPLOY_COMPOSE_NAME=hostr-app
+```
+
+For CI-built app images, set:
+
+```sh
+APP_IMAGE=ghcr.io/<owner>/<repo>/app:latest
+APP_PULL_POLICY=always
+APP_BUILD_CONTEXT=
+```
+
 ## Files
 
-- `bin/hostr-stack`: CLI for initialization, validation, Dokploy deploy, smoke checks, and credentials output.
-- `install.sh`: fresh-VPS installer for Dokploy HTTPS, admin/API bootstrap, deploy, and smoke checks.
-- `scripts/reset-vps.sh`: destructive VPS reset utility for clean retests.
-- `templates/dokploy/`: Per-service Compose files deployed as separate Dokploy stacks.
-- `apps/nextjs-starter`: Minimal Next.js App Router starter with Logto auth integration.
-- `docs/fresh-vps-setup.md`: End-to-end setup from a new VPS to a live stack.
-- `docs/post-deploy-wiring.md`: Manual wiring steps for Logto, Umami, useSend, and AWS SES.
+- `install.sh`: fresh-VPS installer.
+- `scripts/reset-vps.sh`: destructive VPS reset utility.
+- `bin/hostr-stack`: CLI for init, deploy, domains, smoke, backup, restore, and info.
+- `templates/dokploy/`: Dokploy Compose templates.
+- `apps/nextjs-starter`: bundled Next.js starter.
+- `docs/fresh-vps-setup.md`: detailed VPS setup guide.
+- `docs/post-deploy-wiring.md`: product wiring guide.
 - `docs/verification.md`: VPS verification notes.
