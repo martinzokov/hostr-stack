@@ -20,6 +20,10 @@ deliverability require DNS that you control.
 
 For product wiring, Dokploy is the intended place to enter credentials. You
 should not need to SSH into the VPS or manually edit generated env files.
+The CLI only manages the relevant environment variables for each compose
+service, and it preserves existing Dokploy UI values when the local `.env` still
+contains blanks or starter defaults. Custom environment variables that you add
+directly to one compose service in Dokploy are preserved on that service.
 
 ## What Still Needs Wiring
 

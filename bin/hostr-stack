@@ -316,17 +316,53 @@ json_escape_file() {
 }
 
 env_payload() {
-  python3 - "$ENV_FILE" <<'PY'
+  EXISTING_ENV="${EXISTING_ENV:-}" python3 - "$ENV_FILE" "$ROOT_DIR/.env.example" "$@" <<'PY'
 import json, os, pathlib, sys
 
-lines = [
-    line
-    for line in pathlib.Path(sys.argv[1]).read_text().splitlines()
-    if line.strip() and not line.strip().startswith("#")
-]
+env_file = pathlib.Path(sys.argv[1])
+example_file = pathlib.Path(sys.argv[2])
+allowed = sys.argv[3:]
+
+def parse_env(raw):
+    values = {}
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key] = value
+    return values
+
+current = parse_env(env_file.read_text() if env_file.exists() else "")
+defaults = parse_env(example_file.read_text() if example_file.exists() else "")
+existing = parse_env(os.environ.get("EXISTING_ENV", ""))
+managed = set(defaults) | {"COMPOSE_PROFILES", "DOKPLOY_URL", "UMAMI_WEBSITE_ID"}
+
+lines = []
+emitted = set()
+for key in allowed:
+    if key in current:
+        value = current[key]
+        if (
+            key in existing
+            and existing[key]
+            and (not value or value == defaults.get(key))
+        ):
+            value = existing[key]
+    elif key in existing:
+        value = existing[key]
+    else:
+        continue
+    lines.append(f"{key}={value}")
+    emitted.add(key)
+
+for key, value in existing.items():
+    if key not in emitted and key not in managed:
+        lines.append(f"{key}={value}")
+        emitted.add(key)
 
 compose_profiles = os.environ.get("COMPOSE_PROFILES")
-if compose_profiles:
+if compose_profiles and "COMPOSE_PROFILES" in set(allowed):
     lines = [line for line in lines if not line.startswith("COMPOSE_PROFILES=")]
     lines.append(f"COMPOSE_PROFILES={compose_profiles}")
 
@@ -352,6 +388,19 @@ for project in d.get('result', {}).get('data', {}).get('json', []):
                 if c.get('name') == name:
                     print(c.get('composeId') or '')
                     raise SystemExit(0)
+" 2>/dev/null || true
+}
+
+compose_env() {
+  local compose_id="$1"
+  curl -fsS \
+    "https://${DOKPLOY_DOMAIN%/}/api/trpc/compose.one?input=$(python3 -c \
+      "import json,urllib.parse; print(urllib.parse.quote(json.dumps({'json':{'composeId':'$compose_id'}})))")" \
+    -H "x-api-key: $DOKPLOY_API_KEY" \
+    | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print(d.get('result', {}).get('data', {}).get('json', {}).get('env') or '', end='')
 " 2>/dev/null || true
 }
 
@@ -522,10 +571,10 @@ restore() {
 deploy_one() {
   local name="$1"
   local template="$2"
-  local compose_json env_json compose_id response
+  shift 2
+  local compose_json env_json compose_id existing_env response
 
   compose_json="$(json_escape_file "$template")"
-  env_json="$(env_payload)"
 
   compose_id="$(lookup_compose "$name")"
 
@@ -543,6 +592,9 @@ print(d.get("composeId") or d.get("id") or "")
   else
     echo "Found $name ($compose_id)" >&2
   fi
+
+  existing_env="$(compose_env "$compose_id")"
+  env_json="$(EXISTING_ENV="$existing_env" env_payload "$@")"
 
   api_post compose.saveEnvironment \
     "{\"json\":{\"composeId\":\"$compose_id\",\"env\":$env_json}}" >/dev/null
@@ -589,31 +641,60 @@ deploy() {
   local id
 
   # hostr-data (postgres + creates hostr-network)
-  id="$(deploy_one "hostr-data" "$TEMPLATES_DIR/data/docker-compose.yml")"
+  id="$(deploy_one "hostr-data" "$TEMPLATES_DIR/data/docker-compose.yml" \
+    HOSTR_STACK_ROOT \
+    POSTGRES_PASSWORD)"
   api_post compose.deploy "{\"json\":{\"composeId\":\"$id\"}}" >/dev/null
   wait_for_deploy "$id" "hostr-data"
 
   # hostr-logto
-  id="$(deploy_one "hostr-logto" "$TEMPLATES_DIR/logto/docker-compose.yml")"
+  id="$(deploy_one "hostr-logto" "$TEMPLATES_DIR/logto/docker-compose.yml" \
+    POSTGRES_PASSWORD \
+    LOGTO_DOMAIN \
+    LOGTO_ADMIN_DOMAIN)"
   create_domain "$id" logto 3001 "${LOGTO_DOMAIN:-}"
   create_domain "$id" logto 3002 "${LOGTO_ADMIN_DOMAIN:-}"
   api_post compose.deploy "{\"json\":{\"composeId\":\"$id\"}}" >/dev/null
   wait_for_deploy "$id" "hostr-logto"
 
   # hostr-umami
-  id="$(deploy_one "hostr-umami" "$TEMPLATES_DIR/umami/docker-compose.yml")"
+  id="$(deploy_one "hostr-umami" "$TEMPLATES_DIR/umami/docker-compose.yml" \
+    POSTGRES_PASSWORD \
+    UMAMI_APP_SECRET)"
   create_domain "$id" umami 3000 "${UMAMI_DOMAIN:-}"
   api_post compose.deploy "{\"json\":{\"composeId\":\"$id\"}}" >/dev/null
   wait_for_deploy "$id" "hostr-umami"
 
   # hostr-usesend
-  id="$(deploy_one "hostr-usesend" "$TEMPLATES_DIR/usesend/docker-compose.yml")"
+  id="$(deploy_one "hostr-usesend" "$TEMPLATES_DIR/usesend/docker-compose.yml" \
+    POSTGRES_PASSWORD \
+    MINIO_ROOT_PASSWORD \
+    USESEND_DOMAIN \
+    USESEND_NEXTAUTH_SECRET \
+    USESEND_GITHUB_ID \
+    USESEND_GITHUB_SECRET \
+    USESEND_SMTP_CERT_DIR \
+    AWS_DEFAULT_REGION \
+    AWS_ACCESS_KEY \
+    AWS_SECRET_KEY)"
   create_domain "$id" usesend 3000 "${USESEND_DOMAIN:-}"
   api_post compose.deploy "{\"json\":{\"composeId\":\"$id\"}}" >/dev/null
   wait_for_deploy "$id" "hostr-usesend"
 
   # hostr-app
-  id="$(deploy_one "hostr-app" "$TEMPLATES_DIR/app/docker-compose.yml")"
+  id="$(deploy_one "hostr-app" "$TEMPLATES_DIR/app/docker-compose.yml" \
+    APP_IMAGE \
+    APP_PULL_POLICY \
+    APP_DOMAIN \
+    POSTGRES_PASSWORD \
+    LOGTO_APP_ID \
+    LOGTO_APP_SECRET \
+    LOGTO_DOMAIN \
+    LOGTO_COOKIE_SECRET \
+    UMAMI_DOMAIN \
+    UMAMI_WEBSITE_ID \
+    USESEND_DOMAIN \
+    USESEND_API_KEY)"
   create_domain "$id" app 3000 "${APP_DOMAIN:-}"
   api_post compose.deploy "{\"json\":{\"composeId\":\"$id\"}}" >/dev/null
   wait_for_deploy "$id" "hostr-app"

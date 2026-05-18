@@ -230,6 +230,14 @@ APP_BUILD_CONTEXT=
 Your app receives `LOGTO_*`, `DATABASE_URL`, `NEXT_PUBLIC_UMAMI_*`,
 `USESEND_API_URL`, and `USESEND_API_KEY`.
 
+`bin/hostr-stack deploy` scopes Dokploy compose environment variables per
+service. For example, `hostr-app` does not receive Dokploy API credentials or
+useSend's AWS keys, and `hostr-usesend` does not receive Logto app secrets. If
+you add service-specific credentials in the Dokploy UI, later CLI deploys
+preserve those values unless you explicitly set a replacement in `.env`. Custom
+environment variables that you add directly to a compose service in Dokploy are
+also preserved.
+
 ## Post-Deploy Wiring
 
 After deployment, complete product-level setup:
