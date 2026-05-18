@@ -67,6 +67,20 @@ services:
       usesend-redis:
         condition: service_started
 
+  usesend-smtp:
+    image: usesend/smtp-proxy:latest
+    restart: unless-stopped
+    networks: [hostr]
+    environment:
+      SMTP_AUTH_USERNAME: usesend
+      USESEND_BASE_URL: https://${USESEND_DOMAIN}
+      USESEND_API_KEY_PATH: /certs/server.key
+      USESEND_API_CERT_PATH: /certs/server.crt
+    volumes:
+      - ${USESEND_SMTP_CERT_DIR:-/opt/hostr-stack/usesend-smtp-certs}:/certs:ro
+    depends_on:
+      - usesend
+
 volumes:
   usesend_db:
     name: hostr-saas-usesend-db

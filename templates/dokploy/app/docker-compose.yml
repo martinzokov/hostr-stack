@@ -24,3 +24,4 @@ services:
       NEXT_PUBLIC_UMAMI_SRC: https://${UMAMI_DOMAIN}/script.js
       NEXT_PUBLIC_UMAMI_WEBSITE_ID: ${UMAMI_WEBSITE_ID:-}
       USESEND_API_URL: https://${USESEND_DOMAIN}/api
+      USESEND_API_KEY: ${USESEND_API_KEY:-}

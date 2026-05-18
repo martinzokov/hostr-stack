@@ -24,7 +24,8 @@ should not need to SSH into the VPS or manually edit generated env files.
 | Umami tracking | Umami UI, then app compose env | `UMAMI_WEBSITE_ID` |
 | useSend login | GitHub OAuth app, then useSend compose env | `USESEND_GITHUB_ID`, `USESEND_GITHUB_SECRET` |
 | useSend sending | AWS SES/SNS and useSend UI | `AWS_DEFAULT_REGION`, `AWS_ACCESS_KEY`, `AWS_SECRET_KEY` |
-| Logto email | Logto Admin connector | provider/API or SMTP values |
+| App email | useSend UI, then app compose env | `USESEND_API_KEY` |
+| Logto email | Logto Admin SMTP connector | useSend API key as SMTP password |
 
 ## 1. Logto App
 
@@ -115,13 +116,13 @@ and returns to useSend after authorization.
 useSend sends through AWS SES and uses SNS for delivery, bounce, and complaint
 events.
 
-In AWS:
+In AWS, set up access for useSend. Do not manually verify the sending domain in
+SES first when you want useSend to manage it.
 
 1. Pick an SES region.
-2. Verify your sending domain.
-3. Add the DNS records SES provides.
-4. Create IAM credentials for useSend.
-5. Start broad enough to prove the flow, then narrow permissions for production.
+2. Create IAM credentials for useSend.
+3. Start broad enough to prove the flow, then narrow permissions for production.
+4. Request SES production access if the account is still in sandbox mode.
 
 Open the `usesend` compose service in Dokploy and set:
 
@@ -131,11 +132,61 @@ AWS_ACCESS_KEY=<aws-access-key-id>
 AWS_SECRET_KEY=<secret-access-key>
 ```
 
-Redeploy `usesend`, then finish the SES/SNS setup inside the useSend UI at:
+Redeploy `usesend`, then open the useSend UI:
 
 ```text
 https://mail.<domain>
 ```
+
+When useSend asks for **Add SES Settings**, use:
+
+```text
+Region: <aws-region>
+Callback URL: https://mail.<domain>
+Send Rate: 1
+Transactional Quota: 80
+```
+
+The SES callback URL is the public base URL of the useSend instance. Do not use
+the main app URL and do not use the GitHub OAuth callback path here. The GitHub
+OAuth callback remains:
+
+```text
+https://mail.<domain>/api/auth/callback/github
+```
+
+Then add the sending domain inside useSend:
+
+1. Go to **Domains**.
+2. Add the domain you want to send from, for example `<domain>`.
+3. Add the DNS records useSend shows you.
+4. Verify the domain from useSend.
+5. Create a useSend API key under developer settings.
+
+For app-level email, put that API key on the `hostr-app` compose service in
+Dokploy:
+
+```sh
+USESEND_API_URL=https://mail.<domain>/api
+USESEND_API_KEY=<usesend-api-key>
+```
+
+Redeploy `hostr-app`. Keep this key server-side only. Do not expose it as a
+`NEXT_PUBLIC_` variable.
+
+Do not create a separate SES identity for the same sending domain before adding
+it in useSend. If you already created the identity manually in SES, either delete
+that SES identity and add the domain through useSend, or use a dedicated sending
+subdomain such as `send.<domain>`.
+
+If you already have SPF or DMARC records, do not add duplicate SPF records for
+the same host. Merge SPF into one TXT record when needed. DKIM records are
+provider-specific, so add the DKIM record useSend gives you.
+
+If useSend asks you to add MX or TXT records on `mail.<domain>`, also keep an
+explicit DNS A record for `mail.<domain>` pointing to the VPS IP. A wildcard
+record like `* -> <server-ip>` does not supply an A record for `mail.<domain>`
+once MX or TXT records exist at that same host.
 
 SES sandbox mode can block real recipient delivery until AWS grants production
 access.
@@ -144,13 +195,40 @@ access.
 
 This is required for real verification and password reset emails.
 
+The default stack includes useSend's SMTP proxy on the private Docker network so
+Logto can send auth emails through useSend without exposing SMTP ports publicly.
+The SMTP proxy forwards mail to the useSend API.
+
 Recommended order:
 
-1. Finish useSend sending or choose another email provider.
-2. Create the API key or SMTP credentials in that provider.
+1. Finish useSend sending and verify the sending domain.
+2. Create a useSend API key under **Developer Settings**.
 3. Open Logto Admin at `https://auth-admin.<domain>`.
-4. Configure an email connector.
-5. Send a test email from Logto.
+4. Go to **Connectors** and add the **SMTP** email connector.
+5. Use these SMTP settings:
+
+```text
+Host: usesend-smtp
+Port: 587
+Username: usesend
+Password: <usesend-api-key>
+Secure: off
+Ignore TLS: off
+Require TLS: on
+TLS: {"rejectUnauthorized": false}
+From email: noreply@<verified-sending-domain>
+Sender name: <your-product-name>
+```
+
+`usesend-smtp` is the internal Docker service name. Use that value in Logto, not
+`mail.<domain>`. The API key is entered in Logto Admin as the SMTP password; it
+does not need to be added to the `logto` compose service environment. The SMTP
+connection stays inside the private Docker network. The stack mounts a
+self-signed certificate into the useSend SMTP proxy so Logto can issue STARTTLS
+before sending the API key as the SMTP password. `rejectUnauthorized` is disabled
+because the certificate is internal and self-signed.
+
+6. Send a test email from Logto.
 
 Expected result: Logto can deliver verification and password reset emails from
 your domain.

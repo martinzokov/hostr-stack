@@ -552,6 +552,24 @@ print(d.get("composeId") or d.get("id") or "")
   echo "$compose_id"
 }
 
+ensure_usesend_smtp_certs() {
+  local cert_dir="${USESEND_SMTP_CERT_DIR:-/opt/hostr-stack/usesend-smtp-certs}"
+  if [ -f "$cert_dir/server.key" ] && [ -f "$cert_dir/server.crt" ]; then
+    return
+  fi
+
+  need openssl
+  mkdir -p "$cert_dir"
+  openssl req \
+    -x509 \
+    -newkey rsa:2048 \
+    -nodes \
+    -keyout "$cert_dir/server.key" \
+    -out "$cert_dir/server.crt" \
+    -days 3650 \
+    -subj "/CN=usesend-smtp" >/dev/null 2>&1
+}
+
 deploy() {
   need curl
   need python3
@@ -566,6 +584,7 @@ deploy() {
   esac
 
   build_app_image
+  ensure_usesend_smtp_certs
 
   local id
 

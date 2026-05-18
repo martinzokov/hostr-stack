@@ -220,8 +220,8 @@ APP_PULL_POLICY=always
 APP_BUILD_CONTEXT=
 ```
 
-Your app receives `LOGTO_*`, `DATABASE_URL`, `NEXT_PUBLIC_UMAMI_*`, and
-`USESEND_API_URL`.
+Your app receives `LOGTO_*`, `DATABASE_URL`, `NEXT_PUBLIC_UMAMI_*`,
+`USESEND_API_URL`, and `USESEND_API_KEY`.
 
 ## Post-Deploy Wiring
 
