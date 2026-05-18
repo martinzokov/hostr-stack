@@ -6,9 +6,14 @@ compose services, configures domains, and runs smoke checks. This doc only cover
 product-level credentials that need third-party dashboards or first-run admin UI
 steps.
 
+Use a real domain for email. The generated `nip.io` hosts are useful for a
+playground install, but SES domain verification, DKIM, SPF, DMARC, and normal
+deliverability require DNS that you control.
+
 ## How To Apply Changes
 
-1. Open `https://dokploy.<domain>`.
+1. Open your Dokploy panel. This may be `https://dokploy.<domain>` or the
+   generated `https://dokploy.<server-ip-with-dashes>.nip.io` host.
 2. Open the relevant compose service.
 3. Update the environment variables in Dokploy.
 4. Click redeploy in Dokploy.
@@ -66,13 +71,14 @@ https://umami.<domain>
 ```
 
 On a fresh Umami install, sign in with the default admin credentials and change
-the password immediately. Create a website for:
+the password immediately. Create a website for the actual app host:
 
 ```text
-app.<domain>
+<app-domain>
 ```
 
-Use the actual app domain here. By default that is the apex domain.
+By default that is the apex domain, for example `example.com`. If you installed
+with `--app-domain`, use that host instead.
 
 Open the `hostr-app` compose service in Dokploy and set:
 
@@ -115,6 +121,16 @@ and returns to useSend after authorization.
 
 useSend sends through AWS SES and uses SNS for delivery, bounce, and complaint
 events.
+
+Do this in this order:
+
+1. Give useSend AWS credentials in Dokploy.
+2. Add SES settings in useSend.
+3. Add the sending domain in useSend.
+4. Add the DNS records that useSend shows.
+5. Verify the domain in useSend.
+6. Create a useSend API key.
+7. Use that API key from your app and from Logto's SMTP connector.
 
 In AWS, set up access for useSend. Do not manually verify the sending domain in
 SES first when you want useSend to manage it.
@@ -164,7 +180,9 @@ Then add the sending domain inside useSend:
 5. Create a useSend API key under developer settings.
 
 For app-level email, put that API key on the `hostr-app` compose service in
-Dokploy:
+Dokploy. The bundled starter does not send app emails yet, but this is the env
+surface your app should use when you add invites, notifications, onboarding
+emails, billing emails, or other product email:
 
 ```sh
 USESEND_API_URL=https://mail.<domain>/api
@@ -232,6 +250,11 @@ because the certificate is internal and self-signed.
 
 Expected result: Logto can deliver verification and password reset emails from
 your domain.
+
+To test a real auth email, enable email verification-code/passwordless sign-in
+in Logto's **Sign-in Experience**, then sign in through the starter app. The
+verification code email should appear in useSend's **Emails** view and in the
+recipient inbox.
 
 ## Readiness Checklist
 

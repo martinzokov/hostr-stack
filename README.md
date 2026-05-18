@@ -14,7 +14,8 @@ It installs and wires:
 ## Quick Start
 
 Use this path for a fresh playground VPS. You do not need a domain; the installer
-uses nip.io automatically.
+uses nip.io automatically. This proves the stack boots, HTTPS works, and Dokploy
+can deploy the services. Real outbound email still needs a real domain later.
 
 1. SSH into the VPS as root:
 
@@ -114,6 +115,11 @@ mail.example.com        A     <server-ip>
 
 By default the app runs at `example.com`.
 
+If you use a wildcard record, still add the apex/root record separately. For
+Namecheap, use `@` for the apex and `*` for the wildcard. After you configure
+useSend, keep an explicit `mail` A record as well, because MX/TXT records on
+`mail.example.com` stop wildcard A fallback for that host.
+
 To add or change service domains after install:
 
 ```sh
@@ -175,7 +181,8 @@ BLOCK_DOKPLOY_PORT=0                 # leave raw :3000 reachable
 
 ## Existing Dokploy
 
-If Dokploy is already reachable over HTTPS and you have an API key/environment:
+Most users should use `install.sh`. This path is only for an existing Dokploy
+host where you already have an API key and environment ID:
 
 ```sh
 cd /opt/hostr-stack
@@ -230,8 +237,14 @@ After deployment, complete product-level setup:
 1. Open Logto admin at `https://auth-admin.<domain>`.
 2. Create a Traditional Web App.
 3. Set the redirect URI to `https://<app-domain>/callback`.
-4. Add `LOGTO_APP_ID` and `LOGTO_APP_SECRET` to the `hostr-app` compose env in Dokploy.
+4. Add `LOGTO_APP_ID` and `LOGTO_APP_SECRET` to the `hostr-app` compose env in
+   Dokploy.
 5. Redeploy `hostr-app` from Dokploy.
+6. Set up Umami tracking.
+7. Set up useSend login with GitHub OAuth.
+8. Set up AWS SES credentials in Dokploy, then add and verify the sending domain
+   inside useSend.
+9. Configure Logto's SMTP connector to send auth emails through useSend.
 
 See [docs/post-deploy-wiring.md](docs/post-deploy-wiring.md) for Umami,
 useSend, AWS SES/SNS, and Logto email setup.
