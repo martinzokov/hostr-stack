@@ -79,7 +79,7 @@ That file includes the Dokploy API key, but not the Dokploy admin password.
 
 ## Common Commands
 
-From the installed repo:
+Run these on the VPS, from the repo copy that the installer creates:
 
 ```sh
 cd /opt/hostr-stack
@@ -182,7 +182,10 @@ BLOCK_DOKPLOY_PORT=0                 # leave raw :3000 reachable
 ## Existing Dokploy
 
 Most users should use `install.sh`. This path is only for an existing Dokploy
-host where you already have an API key and environment ID:
+host where you already have an API key and environment ID. Run it from a
+hostr-stack repo checkout on that host. If you used the installer, that checkout
+already exists at `/opt/hostr-stack`; otherwise clone or copy the repo there
+first.
 
 ```sh
 cd /opt/hostr-stack

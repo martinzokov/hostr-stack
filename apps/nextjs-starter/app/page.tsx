@@ -11,44 +11,29 @@ export default async function Home() {
     ? await getLogtoContext(logtoConfig)
     : { isAuthenticated: false, claims: undefined };
 
+  const displayName = claims?.name ?? claims?.email ?? claims?.sub;
+
   return (
-    <main className="shell">
-      <section className="panel">
-        <div>
-          <p className="eyebrow">hostr-stack</p>
-          <h1>SaaS starter deployed on your VPS</h1>
-          <p className="lede">
-            Auth, Postgres, analytics, email, and SSL are provisioned through Dokploy.
-          </p>
-        </div>
-
-        <div className="statusGrid">
-          <Status label="Auth" value={configured ? 'Logto configured' : 'Add Logto app credentials'} />
-          <Status label="Database" value="Postgres ready" />
-          <Status label="Analytics" value="Umami endpoint configured" />
-          <Status label="Email" value="useSend endpoint configured" />
-        </div>
-
-        <div className="authBox">
-          {isAuthenticated ? (
-            <>
-              <div>
-                <p className="label">Signed in</p>
-                <p className="subject">{claims?.email ?? claims?.name ?? claims?.sub}</p>
+    <div className="appShell">
+      <header className="header">
+        <div className="headerInner">
+          <a className="logo" href="/">
+            <span className="logoMark" />
+            hostr
+          </a>
+          <div className="headerRight">
+            {isAuthenticated ? (
+              <div className="profileRow">
+                <div className="avatar">{getInitial(displayName)}</div>
+                <span className="profileName">{displayName}</span>
+                <SignOut
+                  onSignOut={async () => {
+                    'use server';
+                    await signOut(logtoConfig);
+                  }}
+                />
               </div>
-              <SignOut
-                onSignOut={async () => {
-                  'use server';
-                  await signOut(logtoConfig);
-                }}
-              />
-            </>
-          ) : (
-            <>
-              <div>
-                <p className="label">Session</p>
-                <p className="subject">{configured ? 'Signed out' : 'Waiting for Logto credentials'}</p>
-              </div>
+            ) : (
               <SignIn
                 disabled={!configured}
                 onSignIn={async () => {
@@ -56,19 +41,77 @@ export default async function Home() {
                   await signIn(logtoConfig);
                 }}
               />
-            </>
-          )}
+            )}
+          </div>
         </div>
-      </section>
-    </main>
+      </header>
+
+      <main className="main">
+        <div className="container">
+          <section className="hero">
+            {isAuthenticated ? (
+              <>
+                <p className="eyebrow">Welcome back</p>
+                <h1>Hello, {displayName?.split(' ')[0] ?? 'there'}.</h1>
+                <p className="lede">
+                  Your SaaS stack is live and ready. Start building your product.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="eyebrow">hostr-stack</p>
+                <h1>Hello, World.</h1>
+                <p className="lede">
+                  A production-ready SaaS starter — auth, database, analytics, and email,
+                  all self-hosted on your VPS via Dokploy.
+                </p>
+                <div className="heroCta">
+                  <SignIn
+                    disabled={!configured}
+                    onSignIn={async () => {
+                      'use server';
+                      await signIn(logtoConfig);
+                    }}
+                  />
+                  <a className="ghostLink" href="https://github.com/martinzokov/hostr-stack" target="_blank" rel="noopener">
+                    View on GitHub
+                  </a>
+                </div>
+              </>
+            )}
+          </section>
+
+          <section className="stackSection">
+            <h2 className="sectionTitle">Stack status</h2>
+            <div className="statusGrid">
+              <Status label="Auth" value={configured ? 'Logto configured' : 'Add credentials'} ok={configured} />
+              <Status label="Database" value="Postgres ready" ok />
+              <Status label="Analytics" value="Umami configured" ok />
+              <Status label="Email" value="useSend configured" ok />
+            </div>
+          </section>
+        </div>
+      </main>
+
+      <footer className="footer">
+        <p>hostr-stack · self-hosted SaaS infrastructure</p>
+      </footer>
+    </div>
   );
 }
 
-function Status({ label, value }: { label: string; value: string }) {
+function getInitial(name?: string) {
+  return name?.charAt(0).toUpperCase() ?? '?';
+}
+
+function Status({ label, value, ok = false }: { label: string; value: string; ok?: boolean }) {
   return (
     <div className="status">
       <p className="label">{label}</p>
-      <p>{value}</p>
+      <p className="statusValue">
+        <span className={ok ? 'statusDot statusDot--ok' : 'statusDot statusDot--warn'} />
+        {value}
+      </p>
     </div>
   );
 }
