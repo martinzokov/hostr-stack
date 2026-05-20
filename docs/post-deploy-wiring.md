@@ -141,8 +141,63 @@ SES first when you want useSend to manage it.
 
 1. Pick an SES region.
 2. Create IAM credentials for useSend.
-3. Start broad enough to prove the flow, then narrow permissions for production.
+3. Attach the AWS-managed `AmazonSESFullAccess` and `AmazonSNSFullAccess`
+   policies, which is what the useSend self-hosting docs currently recommend.
 4. Request SES production access if the account is still in sandbox mode.
+
+Use a dedicated IAM user for useSend, with no console access and one access key.
+The key needs permission to manage SES identities, send email through SES, and
+create/configure SNS topics so useSend can receive delivery, bounce, and
+complaint events.
+
+For a narrower production policy, replace the managed policies with an inline
+policy like this after the setup has been proven. Keep `Resource: "*"` unless you
+have verified the exact SES identity ARNs and SNS topic ARNs that your useSend
+version creates.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "UseSendSes",
+      "Effect": "Allow",
+      "Action": [
+        "ses:VerifyDomainIdentity",
+        "ses:VerifyDomainDkim",
+        "ses:GetIdentityVerificationAttributes",
+        "ses:GetIdentityDkimAttributes",
+        "ses:GetIdentityNotificationAttributes",
+        "ses:SetIdentityNotificationTopic",
+        "ses:SetIdentityFeedbackForwardingEnabled",
+        "ses:DeleteIdentity",
+        "ses:ListIdentities",
+        "ses:GetSendQuota",
+        "ses:GetSendStatistics",
+        "ses:SendEmail",
+        "ses:SendRawEmail"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "UseSendSns",
+      "Effect": "Allow",
+      "Action": [
+        "sns:CreateTopic",
+        "sns:DeleteTopic",
+        "sns:GetTopicAttributes",
+        "sns:SetTopicAttributes",
+        "sns:ListTopics",
+        "sns:Subscribe",
+        "sns:ConfirmSubscription",
+        "sns:ListSubscriptionsByTopic",
+        "sns:Unsubscribe"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
 
 Open the `usesend` compose service in Dokploy and set:
 
@@ -277,5 +332,6 @@ The stack is ready for product work when:
 - Logto Next.js App Router quick start: https://docs.logto.io/quick-starts/next-app-router
 - Umami API docs: https://umami.is/docs/api
 - useSend self-hosting guide: https://docs.usesend.com/self-hosting/overview
+- useSend AWS credentials guide: https://docs.usesend.com/get-started/create-aws-credentials
 - GitHub OAuth app creation: https://docs.github.com/en/developers/apps/creating-an-oauth-app
-- AWS SES credentials: https://docs.aws.amazon.com/ses/latest/dg/smtp-credentials.html
+- AWS SES IAM access control: https://docs.aws.amazon.com/ses/latest/dg/control-user-access.html
