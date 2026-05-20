@@ -1,3 +1,5 @@
+![hostr-stack](./hostr-stack.png "Hostr stack")
+
 # hostr-stack
 
 SaaS-in-a-box bootstrap kit for a single VPS managed by Dokploy.
@@ -45,15 +47,13 @@ Mail:    https://mail.<server-ip-with-dashes>.nip.io
 It also prints a generated Dokploy admin email/password. The password is shown
 once and is not written to disk.
 
-## Clean Retest
-
-To wipe the VPS Docker/Dokploy state before testing again:
+## Cleanup
+To wipe the VPS Docker/Dokploy state:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/scripts/reset-vps.sh | YES=1 bash
 ```
 
-Then rerun the installer.
 
 ## What The Installer Does
 
