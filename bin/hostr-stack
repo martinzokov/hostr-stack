@@ -8,7 +8,7 @@ TEMPLATES_DIR="$ROOT_DIR/templates/dokploy"
 usage() {
   cat <<'USAGE'
 Usage:
-  bin/hostr-stack init [--domain example.com] [--app-domain dashboard.example.com]
+  bin/hostr-stack init [--domain example.com] [--app-domain dashboard.example.com] [--main-app-db postgres|mongodb|convex]
   bin/hostr-stack domain --domain example.com [--app-domain dashboard.example.com] [--dokploy-domain dokploy.example.com] [--no-deploy] [--no-smoke]
   bin/hostr-stack validate
   bin/hostr-stack deploy
@@ -37,6 +37,14 @@ random_secret() {
 
 random_hex() {
   openssl rand -hex "${1:-24}" | tr -d '\n'
+}
+
+normalize_main_app_db() {
+  local value="${1:-postgres}"
+  case "$value" in
+    postgres|mongodb|convex) printf '%s\n' "$value" ;;
+    *) echo "Invalid MAIN_APP_DB=$value. Use postgres, mongodb, or convex." >&2; exit 1 ;;
+  esac
 }
 
 load_env() {
@@ -81,15 +89,20 @@ init_env() {
 
   local domain=""
   local app_domain=""
+  local main_app_db="${MAIN_APP_DB:-}"
   local update_dokploy_domain=1
   while [ $# -gt 0 ]; do
     case "$1" in
       --domain) domain="${2:-}"; shift 2 ;;
       --app-domain) app_domain="${2:-}"; shift 2 ;;
+      --main-app-db|--app-db) main_app_db="${2:-}"; shift 2 ;;
       --keep-dokploy-domain) update_dokploy_domain=0; shift ;;
       *) echo "Unknown init option: $1" >&2; exit 1 ;;
     esac
   done
+
+  main_app_db="$(normalize_main_app_db "${main_app_db:-postgres}")"
+  set_env_value MAIN_APP_DB "$main_app_db"
 
   load_env
   if [ -n "$domain" ]; then
@@ -108,6 +121,9 @@ init_env() {
 
   load_env
   [ -n "${POSTGRES_PASSWORD:-}" ] || set_env_value POSTGRES_PASSWORD "$(random_hex 24)"
+  if [ "$main_app_db" = "mongodb" ] && [ -z "${MONGODB_PASSWORD:-}" ]; then
+    set_env_value MONGODB_PASSWORD "$(random_hex 24)"
+  fi
   [ -n "${UMAMI_APP_SECRET:-}" ] || set_env_value UMAMI_APP_SECRET "$(random_secret 32)"
   [ -n "${LOGTO_COOKIE_SECRET:-}" ] || set_env_value LOGTO_COOKIE_SECRET "$(random_secret 32)"
   [ -n "${USESEND_NEXTAUTH_SECRET:-}" ] || set_env_value USESEND_NEXTAUTH_SECRET "$(random_secret 32)"
@@ -249,13 +265,22 @@ domain() {
 validate() {
   need docker
   load_env
+  local main_app_db app_template data_profiles
+  main_app_db="$(normalize_main_app_db "${MAIN_APP_DB:-postgres}")"
+  app_template="$(app_compose_template "$main_app_db")"
+  data_profiles="$(data_compose_profiles "$main_app_db")"
   local ok=0
+  if COMPOSE_PROFILES="$data_profiles" docker compose --env-file "$ENV_FILE" -f "$TEMPLATES_DIR/data/docker-compose.yml" config >/dev/null 2>&1; then
+    echo "[ok] $TEMPLATES_DIR/data/docker-compose.yml"
+  else
+    echo "[fail] $TEMPLATES_DIR/data/docker-compose.yml" >&2
+    ok=1
+  fi
   for template in \
-    "$TEMPLATES_DIR/data/docker-compose.yml" \
     "$TEMPLATES_DIR/logto/docker-compose.yml" \
     "$TEMPLATES_DIR/umami/docker-compose.yml" \
     "$TEMPLATES_DIR/usesend/docker-compose.yml" \
-    "$TEMPLATES_DIR/app/docker-compose.yml"; do
+    "$app_template"; do
     if docker compose --env-file "$ENV_FILE" -f "$template" config >/dev/null 2>&1; then
       echo "[ok] $template"
     else
@@ -264,6 +289,25 @@ validate() {
     fi
   done
   return "$ok"
+}
+
+app_compose_template() {
+  local main_app_db
+  main_app_db="$(normalize_main_app_db "${1:-${MAIN_APP_DB:-postgres}}")"
+  case "$main_app_db" in
+    postgres) printf '%s\n' "$TEMPLATES_DIR/app/docker-compose.yml" ;;
+    mongodb) printf '%s\n' "$TEMPLATES_DIR/app/mongodb.yml" ;;
+    convex) printf '%s\n' "$TEMPLATES_DIR/app/convex.yml" ;;
+  esac
+}
+
+data_compose_profiles() {
+  local main_app_db
+  main_app_db="$(normalize_main_app_db "${1:-${MAIN_APP_DB:-postgres}}")"
+  case "$main_app_db" in
+    mongodb) printf '%s\n' "mongodb" ;;
+    *) printf '%s\n' "" ;;
+  esac
 }
 
 api_post() {
@@ -503,6 +547,17 @@ dump_database() {
     pg_dump --clean --if-exists --username "$user" --dbname "$database" > "$output"
 }
 
+dump_mongodb() {
+  local output="$1"
+  compose_exec "$TEMPLATES_DIR/data/docker-compose.yml" mongodb \
+    mongodump \
+      --username hostr \
+      --password "$MONGODB_PASSWORD" \
+      --authenticationDatabase admin \
+      --db app \
+      --archive > "$output"
+}
+
 restore_database() {
   local template="$1"
   local service="$2"
@@ -515,9 +570,22 @@ restore_database() {
   compose_exec "$template" "$service" psql --username "$user" --dbname "$database" --set ON_ERROR_STOP=on < "$input"
 }
 
+restore_mongodb() {
+  local input="$1"
+  compose_exec "$TEMPLATES_DIR/data/docker-compose.yml" mongodb \
+    mongorestore \
+      --username hostr \
+      --password "$MONGODB_PASSWORD" \
+      --authenticationDatabase admin \
+      --drop \
+      --archive < "$input"
+}
+
 backup() {
   need docker
   load_env
+  local main_app_db
+  main_app_db="$(normalize_main_app_db "${MAIN_APP_DB:-postgres}")"
 
   local output=""
   while [ $# -gt 0 ]; do
@@ -531,9 +599,20 @@ backup() {
   mkdir -p "$output"
 
   echo "Backing up core Postgres databases to $output"
-  dump_database "$TEMPLATES_DIR/data/docker-compose.yml" postgres hostr app "$output/app.sql"
+  if [ "$main_app_db" = "postgres" ]; then
+    dump_database "$TEMPLATES_DIR/data/docker-compose.yml" postgres hostr app "$output/app.sql"
+  else
+    echo "Skipping app Postgres backup because MAIN_APP_DB=$main_app_db"
+  fi
   dump_database "$TEMPLATES_DIR/data/docker-compose.yml" postgres hostr logto "$output/logto.sql"
   dump_database "$TEMPLATES_DIR/data/docker-compose.yml" postgres hostr umami "$output/umami.sql"
+
+  if [ "$main_app_db" = "mongodb" ]; then
+    echo "Backing up app MongoDB database to $output/app.mongodb.archive"
+    dump_mongodb "$output/app.mongodb.archive"
+  elif [ "$main_app_db" = "convex" ]; then
+    echo "Skipping app Convex backup; export Convex data from Convex separately."
+  fi
 
   echo "Backing up useSend Postgres database to $output/usesend.sql"
   dump_database "$TEMPLATES_DIR/usesend/docker-compose.yml" usesend-db usesend usesend "$output/usesend.sql"
@@ -544,6 +623,8 @@ backup() {
 restore() {
   need docker
   load_env
+  local main_app_db
+  main_app_db="$(normalize_main_app_db "${MAIN_APP_DB:-postgres}")"
 
   local backup_dir="${1:-}"
   local yes="${2:-}"
@@ -552,15 +633,30 @@ restore() {
     echo "Restore is destructive. Re-run with: bin/hostr-stack restore $backup_dir --yes" >&2
     exit 1
   }
-  [ -f "$backup_dir/app.sql" ] || { echo "Missing backup file: $backup_dir/app.sql" >&2; exit 1; }
+  if [ "$main_app_db" = "postgres" ]; then
+    [ -f "$backup_dir/app.sql" ] || { echo "Missing backup file: $backup_dir/app.sql" >&2; exit 1; }
+  elif [ "$main_app_db" = "mongodb" ]; then
+    [ -f "$backup_dir/app.mongodb.archive" ] || { echo "Missing backup file: $backup_dir/app.mongodb.archive" >&2; exit 1; }
+  fi
   [ -f "$backup_dir/logto.sql" ] || { echo "Missing backup file: $backup_dir/logto.sql" >&2; exit 1; }
   [ -f "$backup_dir/umami.sql" ] || { echo "Missing backup file: $backup_dir/umami.sql" >&2; exit 1; }
   [ -f "$backup_dir/usesend.sql" ] || { echo "Missing backup file: $backup_dir/usesend.sql" >&2; exit 1; }
 
   echo "Restoring core Postgres databases from $backup_dir"
-  restore_database "$TEMPLATES_DIR/data/docker-compose.yml" postgres hostr app "$backup_dir/app.sql"
+  if [ "$main_app_db" = "postgres" ]; then
+    restore_database "$TEMPLATES_DIR/data/docker-compose.yml" postgres hostr app "$backup_dir/app.sql"
+  else
+    echo "Skipping app Postgres restore because MAIN_APP_DB=$main_app_db"
+  fi
   restore_database "$TEMPLATES_DIR/data/docker-compose.yml" postgres hostr logto "$backup_dir/logto.sql"
   restore_database "$TEMPLATES_DIR/data/docker-compose.yml" postgres hostr umami "$backup_dir/umami.sql"
+
+  if [ "$main_app_db" = "mongodb" ]; then
+    echo "Restoring app MongoDB database from $backup_dir/app.mongodb.archive"
+    restore_mongodb "$backup_dir/app.mongodb.archive"
+  elif [ "$main_app_db" = "convex" ]; then
+    echo "Skipping app Convex restore; restore Convex data in Convex separately."
+  fi
 
   echo "Restoring useSend Postgres database from $backup_dir/usesend.sql"
   restore_database "$TEMPLATES_DIR/usesend/docker-compose.yml" usesend-db usesend usesend "$backup_dir/usesend.sql"
@@ -626,9 +722,18 @@ deploy() {
   need curl
   need python3
   load_env
+  local main_app_db app_template data_profiles
+  main_app_db="$(normalize_main_app_db "${MAIN_APP_DB:-postgres}")"
+  app_template="$(app_compose_template "$main_app_db")"
+  data_profiles="$(data_compose_profiles "$main_app_db")"
   : "${DOKPLOY_DOMAIN:?Set DOKPLOY_DOMAIN in .env}"
   : "${DOKPLOY_API_KEY:?Set DOKPLOY_API_KEY in .env}"
   : "${DOKPLOY_ENVIRONMENT_ID:?Set DOKPLOY_ENVIRONMENT_ID in .env}"
+  if [ "$main_app_db" = "mongodb" ]; then
+    : "${MONGODB_PASSWORD:?Set MONGODB_PASSWORD in .env or run bin/hostr-stack init --main-app-db mongodb}"
+  elif [ "$main_app_db" = "convex" ]; then
+    : "${CONVEX_URL:?Set CONVEX_URL in .env for MAIN_APP_DB=convex}"
+  fi
   case "$DOKPLOY_DOMAIN" in
     http://*|https://*)
       echo "DOKPLOY_DOMAIN should be a hostname only, e.g. dokploy.example.com" >&2
@@ -641,9 +746,11 @@ deploy() {
   local id
 
   # hostr-data (postgres + creates hostr-network)
-  id="$(deploy_one "hostr-data" "$TEMPLATES_DIR/data/docker-compose.yml" \
+  id="$(COMPOSE_PROFILES="$data_profiles" deploy_one "hostr-data" "$TEMPLATES_DIR/data/docker-compose.yml" \
     HOSTR_STACK_ROOT \
-    POSTGRES_PASSWORD)"
+    POSTGRES_PASSWORD \
+    MONGODB_PASSWORD \
+    COMPOSE_PROFILES)"
   api_post compose.deploy "{\"json\":{\"composeId\":\"$id\"}}" >/dev/null
   wait_for_deploy "$id" "hostr-data"
 
@@ -682,11 +789,16 @@ deploy() {
   wait_for_deploy "$id" "hostr-usesend"
 
   # hostr-app
-  id="$(deploy_one "hostr-app" "$TEMPLATES_DIR/app/docker-compose.yml" \
+  id="$(deploy_one "hostr-app" "$app_template" \
+    MAIN_APP_DB \
     APP_IMAGE \
     APP_PULL_POLICY \
     APP_DOMAIN \
     POSTGRES_PASSWORD \
+    MONGODB_PASSWORD \
+    CONVEX_URL \
+    CONVEX_DEPLOYMENT \
+    CONVEX_DEPLOY_KEY \
     LOGTO_APP_ID \
     LOGTO_APP_SECRET \
     LOGTO_DOMAIN \

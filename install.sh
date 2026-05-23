@@ -11,6 +11,7 @@ DEPLOY_STACK="${DEPLOY_STACK:-1}"
 RUN_SMOKE="${RUN_SMOKE:-1}"
 BLOCK_DOKPLOY_PORT="${BLOCK_DOKPLOY_PORT:-1}"
 DOKPLOY_SETUP_MODE="${DOKPLOY_SETUP_MODE:-auto}"
+MAIN_APP_DB="${MAIN_APP_DB:-postgres}"
 ADMIN_CREATED=0
 
 log() {
@@ -61,6 +62,14 @@ random_hex() {
 
 random_urlsafe() {
   openssl rand -base64 "${1:-32}" | tr '+/' '-_' | tr -d '=\n'
+}
+
+normalize_main_app_db() {
+  local value="${1:-postgres}"
+  case "$value" in
+    postgres|mongodb|convex) printf '%s\n' "$value" ;;
+    *) echo "Invalid MAIN_APP_DB=$value. Use postgres, mongodb, or convex." >&2; exit 1 ;;
+  esac
 }
 
 public_ip() {
@@ -477,7 +486,8 @@ EOF
 
 configure_hostr_env() {
   log "Configuring hostr-stack .env"
-  local init_args=(--domain "$ROOT_DOMAIN")
+  MAIN_APP_DB="$(normalize_main_app_db "$MAIN_APP_DB")"
+  local init_args=(--domain "$ROOT_DOMAIN" --main-app-db "$MAIN_APP_DB")
   if [ -n "${APP_DOMAIN:-}" ]; then
     init_args+=(--app-domain "$APP_DOMAIN")
   fi
@@ -491,6 +501,16 @@ configure_hostr_env() {
   set_env_value .env APP_PULL_POLICY "${APP_PULL_POLICY:-never}"
   set_env_value .env APP_BUILD_CONTEXT "${APP_BUILD_CONTEXT:-./apps/nextjs-starter}"
   set_env_value .env APP_DOCKERFILE "${APP_DOCKERFILE:-Dockerfile}"
+  set_env_value .env MAIN_APP_DB "$MAIN_APP_DB"
+  if [ "$MAIN_APP_DB" = "convex" ] && [ -n "${CONVEX_URL:-}" ]; then
+    set_env_value .env CONVEX_URL "$CONVEX_URL"
+  fi
+  if [ "$MAIN_APP_DB" = "convex" ] && [ -n "${CONVEX_DEPLOYMENT:-}" ]; then
+    set_env_value .env CONVEX_DEPLOYMENT "$CONVEX_DEPLOYMENT"
+  fi
+  if [ "$MAIN_APP_DB" = "convex" ] && [ -n "${CONVEX_DEPLOY_KEY:-}" ]; then
+    set_env_value .env CONVEX_DEPLOY_KEY "$CONVEX_DEPLOY_KEY"
+  fi
 }
 
 deploy_stack() {
@@ -538,6 +558,7 @@ main() {
   fi
   ADMIN_EMAIL="${ADMIN_EMAIL:-admin@$ROOT_DOMAIN}"
   ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(random_urlsafe 24)}"
+  MAIN_APP_DB="$(normalize_main_app_db "$MAIN_APP_DB")"
 
   ensure_repo
   install_dokploy

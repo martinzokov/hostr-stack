@@ -7,7 +7,8 @@ SaaS-in-a-box bootstrap kit for a single VPS managed by Dokploy.
 It installs and wires:
 
 - Auth: Logto
-- Database: Postgres
+- Core database: Postgres
+- Main app database: Postgres by default, or MongoDB/Convex by option
 - Analytics: Umami
 - Email: useSend
 - App: Next.js starter wired for Logto
@@ -168,6 +169,8 @@ Available options:
 ROOT_DOMAIN=example.com
 DOKPLOY_DOMAIN=dokploy.example.com
 APP_DOMAIN=dashboard.example.com     # optional custom app host; default is ROOT_DOMAIN
+MAIN_APP_DB=postgres                  # postgres, mongodb, or convex for the main app
+CONVEX_URL=https://...                # required when MAIN_APP_DB=convex
 DOKPLOY_SETUP_MODE=auto              # auto or manual
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD='...'                 # generated if omitted
@@ -177,6 +180,21 @@ HOSTR_BRANCH=main
 DEPLOY_STACK=0                       # install/configure Dokploy only
 RUN_SMOKE=0                          # deploy but skip smoke tests
 BLOCK_DOKPLOY_PORT=0                 # leave raw :3000 reachable
+```
+
+Postgres is still installed when `MAIN_APP_DB=mongodb` or `MAIN_APP_DB=convex`.
+Dokploy has its own Postgres, and this stack also uses Postgres for Logto,
+Umami, and core service metadata. The option only changes the main app template:
+
+```sh
+# Default app DB.
+curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/install.sh | MAIN_APP_DB=postgres bash
+
+# Starts MongoDB for the app and passes MONGODB_URI to hostr-app.
+curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/install.sh | MAIN_APP_DB=mongodb bash
+
+# Uses external Convex for the app and passes CONVEX_URL/NEXT_PUBLIC_CONVEX_URL.
+curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/install.sh | MAIN_APP_DB=convex CONVEX_URL=https://your-team.convex.cloud bash
 ```
 
 ## Existing Dokploy
@@ -230,8 +248,11 @@ APP_PULL_POLICY=always
 APP_BUILD_CONTEXT=
 ```
 
-Your app receives `LOGTO_*`, `DATABASE_URL`, `NEXT_PUBLIC_UMAMI_*`,
-`USESEND_API_URL`, and `USESEND_API_KEY`.
+Your app always receives `LOGTO_*`, `MAIN_APP_DB`, `NEXT_PUBLIC_UMAMI_*`,
+`USESEND_API_URL`, and `USESEND_API_KEY`. With the default
+`MAIN_APP_DB=postgres`, it also receives `DATABASE_URL`. With
+`MAIN_APP_DB=mongodb`, it receives `MONGODB_URI`. With `MAIN_APP_DB=convex`, it
+receives `CONVEX_URL` and `NEXT_PUBLIC_CONVEX_URL`.
 
 `bin/hostr-stack deploy` scopes Dokploy compose environment variables per
 service. For example, `hostr-app` does not receive Dokploy API credentials or

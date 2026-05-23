@@ -14,9 +14,12 @@ services:
     environment:
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
-      MAIN_APP_DB: postgres
+      MAIN_APP_DB: convex
       NEXT_PUBLIC_APP_URL: https://${APP_DOMAIN}
-      DATABASE_URL: postgresql://hostr:${POSTGRES_PASSWORD}@postgres:5432/app
+      CONVEX_URL: ${CONVEX_URL}
+      NEXT_PUBLIC_CONVEX_URL: ${CONVEX_URL}
+      CONVEX_DEPLOYMENT: ${CONVEX_DEPLOYMENT:-}
+      CONVEX_DEPLOY_KEY: ${CONVEX_DEPLOY_KEY:-}
       LOGTO_APP_ID: ${LOGTO_APP_ID}
       LOGTO_APP_SECRET: ${LOGTO_APP_SECRET}
       LOGTO_ENDPOINT: https://${LOGTO_DOMAIN}

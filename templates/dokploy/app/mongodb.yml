@@ -14,9 +14,9 @@ services:
     environment:
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
-      MAIN_APP_DB: postgres
+      MAIN_APP_DB: mongodb
       NEXT_PUBLIC_APP_URL: https://${APP_DOMAIN}
-      DATABASE_URL: postgresql://hostr:${POSTGRES_PASSWORD}@postgres:5432/app
+      MONGODB_URI: mongodb://hostr:${MONGODB_PASSWORD}@mongodb:27017/app?authSource=admin
       LOGTO_APP_ID: ${LOGTO_APP_ID}
       LOGTO_APP_SECRET: ${LOGTO_APP_SECRET}
       LOGTO_ENDPOINT: https://${LOGTO_DOMAIN}
