@@ -4,7 +4,7 @@
 
 SaaS-in-a-box bootstrap kit for a single VPS managed by Dokploy.
 
-Building a React Native app too? See my boilerplate: [Ship Happens](https://shiphappens.app/).
+Building a mobile app too? Hostr Stack fits perfectly with my boilerplate: [Ship Happens](https://shiphappens.app/).
 
 It installs and wires:
 
