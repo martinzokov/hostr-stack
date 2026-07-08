@@ -1,6 +1,9 @@
 name: hostr-app
 
 networks:
+  dokploy:
+    external: true
+    name: dokploy-network
   hostr:
     external: true
     name: hostr-network
@@ -10,7 +13,7 @@ services:
     image: ${APP_IMAGE:-hostr-nextjs-starter:latest}
     pull_policy: ${APP_PULL_POLICY:-never}
     restart: unless-stopped
-    networks: [hostr]
+    networks: [dokploy, hostr]
     environment:
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
@@ -18,8 +21,7 @@ services:
       NEXT_PUBLIC_APP_URL: https://${APP_DOMAIN}
       CONVEX_URL: ${CONVEX_URL}
       NEXT_PUBLIC_CONVEX_URL: ${CONVEX_URL}
-      CONVEX_DEPLOYMENT: ${CONVEX_DEPLOYMENT:-}
-      CONVEX_DEPLOY_KEY: ${CONVEX_DEPLOY_KEY:-}
+      CONVEX_SELF_HOSTED_URL: ${CONVEX_URL}
       LOGTO_APP_ID: ${LOGTO_APP_ID}
       LOGTO_APP_SECRET: ${LOGTO_APP_SECRET}
       LOGTO_ENDPOINT: https://${LOGTO_DOMAIN}

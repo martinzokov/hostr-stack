@@ -265,9 +265,8 @@ domain() {
 validate() {
   need docker
   load_env
-  local main_app_db app_template data_profiles
+  local main_app_db data_profiles
   main_app_db="$(normalize_main_app_db "${MAIN_APP_DB:-postgres}")"
-  app_template="$(app_compose_template "$main_app_db")"
   data_profiles="$(data_compose_profiles "$main_app_db")"
   local ok=0
   if COMPOSE_PROFILES="$data_profiles" docker compose --env-file "$ENV_FILE" -f "$TEMPLATES_DIR/data/docker-compose.yml" config >/dev/null 2>&1; then
@@ -277,10 +276,10 @@ validate() {
     ok=1
   fi
   for template in \
+    "$TEMPLATES_DIR/convex/docker-compose.yml" \
     "$TEMPLATES_DIR/logto/docker-compose.yml" \
     "$TEMPLATES_DIR/umami/docker-compose.yml" \
-    "$TEMPLATES_DIR/usesend/docker-compose.yml" \
-    "$app_template"; do
+    "$TEMPLATES_DIR/usesend/docker-compose.yml"; do
     if docker compose --env-file "$ENV_FILE" -f "$template" config >/dev/null 2>&1; then
       echo "[ok] $template"
     else
@@ -722,10 +721,15 @@ deploy() {
   need curl
   need python3
   load_env
-  local main_app_db app_template data_profiles
+  local main_app_db data_profiles
   main_app_db="$(normalize_main_app_db "${MAIN_APP_DB:-postgres}")"
-  app_template="$(app_compose_template "$main_app_db")"
   data_profiles="$(data_compose_profiles "$main_app_db")"
+  CONVEX_DOMAIN="${CONVEX_DOMAIN:-convex.${ROOT_DOMAIN:-}}"
+  CONVEX_SITE_DOMAIN="${CONVEX_SITE_DOMAIN:-convex-site.${ROOT_DOMAIN:-}}"
+  CONVEX_DASHBOARD_DOMAIN="${CONVEX_DASHBOARD_DOMAIN:-convex-dashboard.${ROOT_DOMAIN:-}}"
+  if [ "$main_app_db" = "convex" ] && [ -z "${CONVEX_URL:-}" ] && [ -n "${CONVEX_DOMAIN:-}" ]; then
+    CONVEX_URL="https://${CONVEX_DOMAIN}"
+  fi
   : "${DOKPLOY_DOMAIN:?Set DOKPLOY_DOMAIN in .env}"
   : "${DOKPLOY_API_KEY:?Set DOKPLOY_API_KEY in .env}"
   : "${DOKPLOY_ENVIRONMENT_ID:?Set DOKPLOY_ENVIRONMENT_ID in .env}"
@@ -733,6 +737,7 @@ deploy() {
     : "${MONGODB_PASSWORD:?Set MONGODB_PASSWORD in .env or run bin/hostr-stack init --main-app-db mongodb}"
   elif [ "$main_app_db" = "convex" ]; then
     : "${CONVEX_URL:?Set CONVEX_URL in .env for MAIN_APP_DB=convex}"
+    : "${CONVEX_INSTANCE_SECRET:?Set CONVEX_INSTANCE_SECRET in .env for self-hosted Convex}"
   fi
   case "$DOKPLOY_DOMAIN" in
     http://*|https://*)
@@ -740,7 +745,6 @@ deploy() {
       exit 1 ;;
   esac
 
-  build_app_image
   ensure_usesend_smtp_certs
 
   local id
@@ -788,30 +792,20 @@ deploy() {
   api_post compose.deploy "{\"json\":{\"composeId\":\"$id\"}}" >/dev/null
   wait_for_deploy "$id" "hostr-usesend"
 
-  # hostr-app
-  id="$(deploy_one "hostr-app" "$app_template" \
-    MAIN_APP_DB \
-    APP_IMAGE \
-    APP_PULL_POLICY \
-    APP_DOMAIN \
-    POSTGRES_PASSWORD \
-    MONGODB_PASSWORD \
-    CONVEX_URL \
-    CONVEX_DEPLOYMENT \
-    CONVEX_DEPLOY_KEY \
-    LOGTO_APP_ID \
-    LOGTO_APP_SECRET \
-    LOGTO_DOMAIN \
-    LOGTO_COOKIE_SECRET \
-    UMAMI_DOMAIN \
-    UMAMI_WEBSITE_ID \
-    USESEND_DOMAIN \
-    USESEND_API_KEY)"
-  create_domain "$id" app 3000 "${APP_DOMAIN:-}"
-  api_post compose.deploy "{\"json\":{\"composeId\":\"$id\"}}" >/dev/null
-  wait_for_deploy "$id" "hostr-app"
+  if [ "$main_app_db" = "convex" ]; then
+    id="$(deploy_one "hostr-convex" "$TEMPLATES_DIR/convex/docker-compose.yml" \
+      CONVEX_DOMAIN \
+      CONVEX_SITE_DOMAIN \
+      CONVEX_DASHBOARD_DOMAIN \
+      CONVEX_INSTANCE_SECRET)"
+    create_domain "$id" convex-backend 3210 "${CONVEX_DOMAIN:-}"
+    create_domain "$id" convex-backend 3211 "${CONVEX_SITE_DOMAIN:-}"
+    create_domain "$id" convex-dashboard 6791 "${CONVEX_DASHBOARD_DOMAIN:-}"
+    api_post compose.deploy "{\"json\":{\"composeId\":\"$id\"}}" >/dev/null
+    wait_for_deploy "$id" "hostr-convex"
+  fi
 
-  echo "All services deployed"
+  echo "All infrastructure services deployed"
 }
 
 smoke() {

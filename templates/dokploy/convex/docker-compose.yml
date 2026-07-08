@@ -1,0 +1,46 @@
+name: hostr-convex
+
+networks:
+  hostr:
+    external: true
+    name: hostr-network
+
+services:
+  convex-backend:
+    image: ghcr.io/get-convex/convex-backend:latest
+    restart: unless-stopped
+    stop_grace_period: 10s
+    stop_signal: SIGINT
+    networks: [hostr]
+    volumes:
+      - convex_data:/convex/data
+    environment:
+      CONVEX_CLOUD_ORIGIN: https://${CONVEX_DOMAIN}
+      CONVEX_SITE_ORIGIN: https://${CONVEX_SITE_DOMAIN}
+      DISABLE_METRICS_ENDPOINT: "true"
+      DOCUMENT_RETENTION_DELAY: "172800"
+      INSTANCE_NAME: hikarigen
+      INSTANCE_SECRET: ${CONVEX_INSTANCE_SECRET}
+      RUST_LOG: info
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3210/version"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  convex-dashboard:
+    image: ghcr.io/get-convex/convex-dashboard:latest
+    restart: unless-stopped
+    stop_grace_period: 10s
+    stop_signal: SIGINT
+    networks: [hostr]
+    environment:
+      NEXT_PUBLIC_DEPLOYMENT_URL: https://${CONVEX_DOMAIN}
+    depends_on:
+      convex-backend:
+        condition: service_healthy
+
+volumes:
+  convex_data:
+    name: hostr-saas-convex-data

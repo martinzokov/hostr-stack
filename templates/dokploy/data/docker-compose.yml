@@ -23,25 +23,6 @@ services:
       timeout: 5s
       retries: 12
 
-  mongodb:
-    image: mongo:7
-    restart: unless-stopped
-    profiles: ["mongodb"]
-    networks: [hostr]
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: hostr
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_PASSWORD}
-      MONGO_INITDB_DATABASE: app
-    volumes:
-      - mongodb_data:/data/db
-    healthcheck:
-      test: ["CMD-SHELL", "mongosh --quiet -u hostr -p \"$${MONGO_INITDB_ROOT_PASSWORD}\" --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\""]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-
 volumes:
   postgres_data:
     name: hostr-saas-postgres-data
-  mongodb_data:
-    name: hostr-saas-mongodb-data
