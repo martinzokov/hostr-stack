@@ -1,0 +1,12 @@
+{
+  "designSystemId": "29765156-3992-417d-9ded-c0dd47bf4111",
+  "installScope": "project",
+  "packageId": "3df397f6-d189-46f0-a859-69e9abf7ed2a",
+  "skillFolderName": "typeui-design-system",
+  "slug": "premium",
+  "source": "workspace",
+  "templateSlug": "premium",
+  "type": "typeui-design-system",
+  "variant": "workspace",
+  "workspaceId": "c28b6f0a-a628-45c5-93bc-5aaddf633e1a"
+}

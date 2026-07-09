@@ -12,6 +12,9 @@ RUN_SMOKE="${RUN_SMOKE:-1}"
 BLOCK_DOKPLOY_PORT="${BLOCK_DOKPLOY_PORT:-1}"
 DOKPLOY_SETUP_MODE="${DOKPLOY_SETUP_MODE:-auto}"
 MAIN_APP_DB="${MAIN_APP_DB:-postgres}"
+DOKPLOY_ACME_CHALLENGE="${DOKPLOY_ACME_CHALLENGE:-http}"
+DOKPLOY_ACME_DNS_PROVIDER="${DOKPLOY_ACME_DNS_PROVIDER:-cloudflare}"
+DOKPLOY_ACME_DNS_RESOLVERS="${DOKPLOY_ACME_DNS_RESOLVERS:-1.1.1.1:53,8.8.8.8:53}"
 ADMIN_CREATED=0
 
 log() {
@@ -69,6 +72,34 @@ normalize_main_app_db() {
   case "$value" in
     postgres|mongodb|convex) printf '%s\n' "$value" ;;
     *) echo "Invalid MAIN_APP_DB=$value. Use postgres, mongodb, or convex." >&2; exit 1 ;;
+  esac
+}
+
+normalize_dokploy_acme_challenge() {
+  local value="${1:-http}"
+  case "$value" in
+    http|dns) printf '%s\n' "$value" ;;
+    *) echo "Invalid DOKPLOY_ACME_CHALLENGE=$value. Use http or dns." >&2; exit 1 ;;
+  esac
+}
+
+validate_acme_config() {
+  if [ "$DOKPLOY_ACME_CHALLENGE" != "dns" ]; then
+    return
+  fi
+
+  case "$DOKPLOY_ACME_DNS_PROVIDER" in
+    cloudflare)
+      if [ -z "${CF_DNS_API_TOKEN:-}" ] && [ -z "${CLOUDFLARE_DNS_API_TOKEN:-}" ] &&
+        { [ -z "${CF_API_EMAIL:-}" ] || [ -z "${CF_API_KEY:-}" ]; } &&
+        { [ -z "${CLOUDFLARE_EMAIL:-}" ] || [ -z "${CLOUDFLARE_API_KEY:-}" ]; }; then
+        cat >&2 <<'EOF'
+DOKPLOY_ACME_CHALLENGE=dns with Cloudflare needs Cloudflare credentials.
+Set CF_DNS_API_TOKEN to a token with Zone:Read and DNS:Edit for the zone.
+EOF
+        exit 1
+      fi
+      ;;
   esac
 }
 
@@ -198,9 +229,31 @@ certificatesResolvers:
     acme:
       email: $ADMIN_EMAIL
       storage: /etc/dokploy/traefik/dynamic/acme.json
+EOF
+
+  if [ "$DOKPLOY_ACME_CHALLENGE" = "dns" ]; then
+    cat >>/etc/dokploy/traefik/traefik.yml <<EOF
+      dnsChallenge:
+        provider: $DOKPLOY_ACME_DNS_PROVIDER
+EOF
+    if [ -n "$DOKPLOY_ACME_DNS_RESOLVERS" ]; then
+      cat >>/etc/dokploy/traefik/traefik.yml <<'EOF'
+        resolvers:
+EOF
+      local resolver
+      local old_ifs="$IFS"
+      IFS=","
+      for resolver in $DOKPLOY_ACME_DNS_RESOLVERS; do
+        printf '          - "%s"\n' "$resolver" >>/etc/dokploy/traefik/traefik.yml
+      done
+      IFS="$old_ifs"
+    fi
+  else
+    cat >>/etc/dokploy/traefik/traefik.yml <<'EOF'
       httpChallenge:
         entryPoint: web
 EOF
+  fi
 
   cat >/etc/dokploy/traefik/dynamic/middlewares.yml <<'EOF'
 http:
@@ -237,7 +290,43 @@ http:
 EOF
 }
 
+TRAEFIK_CREATE_ENV_ARGS=()
+TRAEFIK_UPDATE_ENV_ARGS=()
+
+build_traefik_env_args() {
+  TRAEFIK_CREATE_ENV_ARGS=()
+  TRAEFIK_UPDATE_ENV_ARGS=()
+
+  if [ "$DOKPLOY_ACME_CHALLENGE" != "dns" ]; then
+    return
+  fi
+
+  local name
+  for name in \
+    CF_API_EMAIL \
+    CF_API_KEY \
+    CF_DNS_API_TOKEN \
+    CF_ZONE_API_TOKEN \
+    CLOUDFLARE_API_KEY \
+    CLOUDFLARE_DNS_API_TOKEN \
+    CLOUDFLARE_EMAIL \
+    CLOUDFLARE_ZONE_API_TOKEN \
+    CLOUDFLARE_BASE_URL \
+    CLOUDFLARE_HTTP_TIMEOUT \
+    CLOUDFLARE_POLLING_INTERVAL \
+    CLOUDFLARE_PROPAGATION_TIMEOUT \
+    CLOUDFLARE_TTL \
+    LEGO_DISABLE_CNAME_SUPPORT; do
+    if [ -n "${!name:-}" ]; then
+      TRAEFIK_CREATE_ENV_ARGS+=(--env "$name=${!name}")
+      TRAEFIK_UPDATE_ENV_ARGS+=(--env-add "$name=${!name}")
+    fi
+  done
+}
+
 ensure_traefik() {
+  build_traefik_env_args
+
   if docker ps -a --format '{{.Names}}' | grep -qx dokploy-traefik; then
     log "Reusing Dokploy Traefik container"
     if docker service ls --format '{{.Name}}' | grep -qx dokploy-traefik; then
@@ -248,7 +337,7 @@ ensure_traefik() {
   fi
 
   if docker service ls --format '{{.Name}}' | grep -qx dokploy-traefik; then
-    docker service update --force dokploy-traefik >/dev/null
+    docker service update "${TRAEFIK_UPDATE_ENV_ARGS[@]}" --force dokploy-traefik >/dev/null
     return
   fi
 
@@ -260,6 +349,7 @@ ensure_traefik() {
     --publish published=443,target=443,mode=host \
     --mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock,readonly \
     --mount type=bind,source=/etc/dokploy/traefik,target=/etc/dokploy/traefik \
+    "${TRAEFIK_CREATE_ENV_ARGS[@]}" \
     --network dokploy-network \
     traefik:v3.1 \
     --configFile=/etc/dokploy/traefik/traefik.yml >/dev/null
@@ -274,7 +364,11 @@ wait_for_dokploy_https() {
     sleep 5
   done
   echo "Dokploy HTTPS did not become reachable at https://$DOKPLOY_DOMAIN." >&2
-  echo "Check that DNS for $DOKPLOY_DOMAIN points to $ip before running with a real domain." >&2
+  if [ "$DOKPLOY_ACME_CHALLENGE" = "dns" ]; then
+    echo "Check Traefik ACME DNS challenge logs and Cloudflare token permissions for $DOKPLOY_DOMAIN." >&2
+  else
+    echo "Check that DNS for $DOKPLOY_DOMAIN points to $ip before running with a real domain." >&2
+  fi
   echo "Recent Traefik ACME logs:" >&2
   docker logs --tail 40 dokploy-traefik 2>&1 | grep -iE 'acme|certificate|dns|error' >&2 || true
   exit 1
@@ -559,6 +653,8 @@ main() {
   ADMIN_EMAIL="${ADMIN_EMAIL:-admin@$ROOT_DOMAIN}"
   ADMIN_PASSWORD="${ADMIN_PASSWORD:-$(random_urlsafe 24)}"
   MAIN_APP_DB="$(normalize_main_app_db "$MAIN_APP_DB")"
+  DOKPLOY_ACME_CHALLENGE="$(normalize_dokploy_acme_challenge "$DOKPLOY_ACME_CHALLENGE")"
+  validate_acme_config
 
   ensure_repo
   install_dokploy

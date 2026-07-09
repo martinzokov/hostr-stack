@@ -145,6 +145,30 @@ When `--dokploy-domain` is set, the CLI rewrites the Dokploy Traefik route,
 updates Dokploy's Better Auth public URL, adds the new trusted origin, waits for
 the new HTTPS endpoint, then deploys the service domains.
 
+## Private Admin Domains
+
+If admin services should only be reachable over a private network such as
+Tailscale, keep those DNS records pointed at the private Tailscale IP. Do not
+point them at the public VPS IP just for HTTPS.
+
+Use DNS-01 ACME instead, so Let's Encrypt validates domain ownership by creating
+temporary Cloudflare TXT records instead of calling back to the private
+hostname:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/martinzokov/hostr-stack/main/install.sh \
+  | ROOT_DOMAIN=example.com \
+    DOKPLOY_DOMAIN=dokploy.example.com \
+    DOKPLOY_ACME_CHALLENGE=dns \
+    CF_DNS_API_TOKEN=cloudflare-token-with-zone-read-and-dns-edit \
+    bash
+```
+
+For Cloudflare, the token needs `Zone / Zone / Read` and `Zone / DNS / Edit`
+for the domain zone. Public hosts such as the app, auth, and mail can still use
+public or proxied Cloudflare records; DNS-01 works for both public and private
+hostnames.
+
 ## Manual Dokploy Setup
 
 Auto-mode is the default. If you want to create the Dokploy admin/API
@@ -182,6 +206,9 @@ HOSTR_BRANCH=main
 DEPLOY_STACK=0                       # install/configure Dokploy only
 RUN_SMOKE=0                          # deploy but skip smoke tests
 BLOCK_DOKPLOY_PORT=0                 # leave raw :3000 reachable
+DOKPLOY_ACME_CHALLENGE=http          # http or dns; use dns for private admin hosts
+DOKPLOY_ACME_DNS_PROVIDER=cloudflare # Traefik/lego DNS provider when challenge=dns
+CF_DNS_API_TOKEN=...                 # Cloudflare token for DNS-01 when challenge=dns
 ```
 
 Postgres is still installed when `MAIN_APP_DB=mongodb` or `MAIN_APP_DB=convex`.

@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "source": "workspace-visual-schema",
+  "name": "Premium",
+  "slug": "premium",
+  "project": {
+    "name": "VoxTale",
+    "logoUrl": null
+  },
+  "importSource": {
+    "type": "manual",
+    "importedAt": "2026-07-08T19:27:04.711Z",
+    "sourceName": "TypeUI design skill: Premium"
+  },
+  "components": [
+    "color",
+    "typography",
+    "layout",
+    "radius",
+    "shadow",
+    "borders",
+    "button",
+    "button-group",
+    "card",
+    "input",
+    "alert",
+    "badge",
+    "list",
+    "avatar",
+    "icon-shape",
+    "accordion",
+    "dropdown",
+    "modal",
+    "tabs",
+    "table",
+    "pagination",
+    "sidebar",
+    "radio",
+    "checkbox",
+    "toggle",
+    "tooltip",
+    "popovers",
+    "content"
+  ]
+}
